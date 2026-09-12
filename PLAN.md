@@ -1,6 +1,6 @@
 # Signal implementation plan
 
-Status: M0 partial pending manual tray Open/Quit verification; implementation and independent checks are complete. Stopped for review. M1 is not started. See `docs/verification/M0.md` for evidence and the precise tooling blocker.
+Status: M0 complete, including user-confirmed tray Open/Quit verification on September 12, 2026. Stopped for review. M1 is not started. See `docs/verification/M0.md` for evidence, launch commands, and remaining feature stubs.
 
 ## Sources and scope
 
@@ -154,7 +154,7 @@ The schema does not specify durable running/paused timers, meeting attendance or
 
 ### M0 — Scaffold
 
-Implementation is in place. `pnpm check`, six meaningful foundation tests, production frontend build, Rust checks/native launch, seed loading/reloading, ordinary-data isolation, SQLite integrity, local fonts, initial/minimum dimensions, geometry persistence/maximized restart, OFF close/relaunch, and tray hiding have passed. Tray Open/Quit remains unverified because native automation cannot access the Windows notification area. See `docs/verification/M0.md` for the manual recovery path. M0 remains partial until that check is recorded; M1 is not authorized.
+M0 is complete. `pnpm check`, six meaningful foundation tests, production frontend build, Rust checks/native launch, seed loading/reloading, ordinary-data isolation, SQLite integrity, local fonts, initial/minimum dimensions, geometry persistence/maximized restart, OFF close/relaunch, and tray hiding have passed. On September 12, 2026, the user manually confirmed both tray Open and Quit work, completing the final check that native automation could not perform. Implementation is committed as `1886045`. See `docs/verification/M0.md` for evidence and review paths. Stop for review; M1 is not authorized.
 
 - Validate local pnpm/Node, Rust, Windows build prerequisites, and WebView2; initialize the fixed stack and scripts (`check`, `test`, `tauri`).
 - Build the token inventory: exact colors and tints, border variants, type scales/weights, spacing, geometry, radii, shadows, focus ring, opacity, and 120ms transitions. Bundle fonts and use dark mode only.
