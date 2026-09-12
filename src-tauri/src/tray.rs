@@ -27,6 +27,9 @@ pub fn setup(app: &App) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "quit" => {
+                if crate::exit_guard::intercept(app, "quit") {
+                    return;
+                }
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = crate::window::save(&window.as_ref().window(), true);
                 }

@@ -1,6 +1,6 @@
 # Signal implementation plan
 
-Status: M0 complete, including user-confirmed tray Open/Quit verification on September 12, 2026. Stopped for review. M1 is not started. See `docs/verification/M0.md` for evidence, launch commands, and remaining feature stubs.
+Status: M0 and M1 complete. On September 12, 2026, the user confirmed all M1 manual acceptance checks passed and authorized the milestone commit and push. See `docs/verification/M1.md` for automated results, native evidence, and user sign-off. M2 is not started.
 
 ## Sources and scope
 
@@ -8,7 +8,7 @@ Status: M0 complete, including user-confirmed tray Open/Quit verification on Sep
 - Visual reference: `_design/design_handoff_signal/Signal.standalone.html`, opened and inspected in Microsoft Edge. Accepted screens: `#1b`, `#2a`–`#2e`, `#3a`–`#3e`. Rejected explorations do not inform implementation.
 - The handoff lives under `_design/` in this repository, rather than the path originally quoted in the request.
 - Precedence: explicit user instructions, then handoff README, then accepted HTML. Unspecified product behavior requires a question before implementation; proposals below are not settled requirements.
-- M0 implementation was explicitly approved with the adjustments recorded in `docs/decisions.md`. That approval does not extend to M1.
+- M0 implementation was explicitly approved with the adjustments recorded in `docs/decisions.md`. M1 execution was subsequently authorized by the user after approval of D1–D8; the four task/spec pairs are complete, with manual acceptance confirmed by the user.
 - Execute M0 through M7 in order, one milestone per review. Stop after each milestone for the user's review before starting the next.
 
 ## Fixed implementation choices
@@ -154,7 +154,7 @@ The schema does not specify durable running/paused timers, meeting attendance or
 
 ### M0 — Scaffold
 
-M0 is complete. `pnpm check`, six meaningful foundation tests, production frontend build, Rust checks/native launch, seed loading/reloading, ordinary-data isolation, SQLite integrity, local fonts, initial/minimum dimensions, geometry persistence/maximized restart, OFF close/relaunch, and tray hiding have passed. On September 12, 2026, the user manually confirmed both tray Open and Quit work, completing the final check that native automation could not perform. Implementation is committed as `1886045`. See `docs/verification/M0.md` for evidence and review paths. Stop for review; M1 is not authorized.
+M0 is complete. `pnpm check`, six meaningful foundation tests, production frontend build, Rust checks/native launch, seed loading/reloading, ordinary-data isolation, SQLite integrity, local fonts, initial/minimum dimensions, geometry persistence/maximized restart, OFF close/relaunch, and tray hiding have passed. On September 12, 2026, the user manually confirmed both tray Open and Quit work, completing the final check that native automation could not perform. Implementation is committed as `1886045`. See `docs/verification/M0.md` for evidence and review paths. This records the M0 review boundary. M1 was subsequently authorized; its completed verification and user acceptance are in `docs/verification/M1.md`.
 
 - Validate local pnpm/Node, Rust, Windows build prerequisites, and WebView2; initialize the fixed stack and scripts (`check`, `test`, `tauri`).
 - Build the token inventory: exact colors and tints, border variants, type scales/weights, spacing, geometry, radii, shadows, focus ring, opacity, and 120ms transitions. Bundle fonts and use dark mode only.
@@ -169,9 +169,11 @@ M0 is complete. `pnpm check`, six meaningful foundation tests, production fronte
 
 ### M1 — Projects & Board (`#1b`, `#3a`)
 
+Execution status: complete. All four task/spec pairs are implemented, automated checks pass, and the user confirmed all manual acceptance checks on September 12, 2026. The milestone commit and push are authorized. Evidence and remaining later-phase stubs are recorded in `docs/verification/M1.md`. M2 has not begun.
+
 - Implement project create/read/update/delete and sort using the approved edit/delete interaction; offer cyan/lime/magenta/violet by default, excluding orange.
 - Build Board/Week/Notes sub-bar, specified filter/group affordances, 5 equal status columns (14px gaps), database counts, and cards with exact chip/due/progress/blocked/done/selected treatments.
-- Drag cards between columns with persisted status and `done_at` updates. Resolve card ordering and blocked-reason editing before implementation.
+- Drag cards between columns with persisted status and `done_at` updates. Use a translucent destination card preview that becomes solid on drop, with a faded source and failure restoration (user review refinement, September 12, 2026). Resolve card ordering and blocked-reason editing before implementation.
 - Render the 09–18 meetings strip, positioned pills, project-colored label, and live now tick. Meeting editing arrives in M4.
 - Implement the 600px new-task modal, all specified fields, alert chips, tags, subtasks, markdown/drop attachments, submit shortcuts, and external-link paste detection. URL alone fills provider/ID; a title is only filled from user-supplied pasted title text.
 - Implement the 820px task detail modal with `1fr 280px` rails, breadcrumb/link, editable fields, subtask progress, sanitized markdown, attachment copying, tags, priority, due/alerts, linked meeting, and time card.
@@ -183,6 +185,7 @@ M0 is complete. `pnpm check`, six meaningful foundation tests, production fronte
 
 - Implement a persisted one-timer-per-task state machine supporting concurrent tasks and the approved pause/resume semantics.
 - Derive elapsed time from persisted timestamps; repaint each second without accumulating tick drift. Restore accurately after restart and while hidden.
+- Display running elapsed time as `HH:MM:SS` (for example `00:02:17`), with visibly advancing seconds. Explicit user preference recorded September 12, 2026; this remains M2 work.
 - Stop atomically appends a completed time entry and clears/finalizes timer state exactly once; manual Log writes entries through the same time accounting boundary.
 - Update derived hours, progress displays, header singular/plural timer chip, and tray tooltip. Associate entries with a block when started from a block in M3.
 - Unit tests: simultaneous tasks, duplicate start/stop, elapsed time after restart, paused intervals, fractional minutes, and approved clock/sleep behavior.
@@ -288,4 +291,4 @@ These questions identify gaps rather than granting permission to invent behavior
 
 ## Approval boundary
 
-M0 was approved with the decisions above. Stop after its verification and conventional commit for the user's review. Later unresolved decisions are raised at their milestone; no M1 implementation is authorized by this M0 approval.
+M0 was approved with the decisions above. Stop after its verification and conventional commit for the user's review. Later unresolved decisions are raised at their milestone; M1 required separate approval, which the user subsequently supplied together with D1–D8 and explicit execution of all four task/spec pairs.

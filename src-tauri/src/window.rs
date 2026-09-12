@@ -98,6 +98,12 @@ pub fn save(window: &Window, flush: bool) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 pub fn handle(window: &Window, event: &WindowEvent) {
+    if let WindowEvent::CloseRequested { api, .. } = event {
+        if crate::exit_guard::intercept(window.app_handle(), "close") {
+            api.prevent_close();
+            return;
+        }
+    }
     if matches!(event, WindowEvent::CloseRequested { .. }) {
         window
             .state::<GeometryReady>()

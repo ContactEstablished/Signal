@@ -1,5 +1,5 @@
 /** Accepted #1b, #2a–e and #3b–d, reconciled at 2025-09-11 13:42 America/New_York.
- * No active timer state or attachment files. See docs/verification/M0.md for conflicts.
+ * No active timer state. M1 installs synthetic local attachments separately; see docs/verification/M1.md.
  * Opaque stable fixture keys; external provider IDs are attributes, not primary keys.
  */
 export const FIXTURE_NOW = '2025-09-11T17:42:00.000Z';

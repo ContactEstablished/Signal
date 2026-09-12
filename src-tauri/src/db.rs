@@ -22,12 +22,20 @@ impl RuntimeState {
     }
 }
 pub fn migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 1,
-        description: "initial_handoff_schema",
-        sql: include_str!("../migrations/0001_initial.sql"),
-        kind: MigrationKind::Up,
-    }]
+    vec![
+        Migration {
+            version: 1,
+            description: "initial_handoff_schema",
+            sql: include_str!("../migrations/0001_initial.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "board_fields_and_files",
+            sql: include_str!("../migrations/0002_board_fields.sql"),
+            kind: MigrationKind::Up,
+        },
+    ]
 }
 #[derive(Serialize)]
 pub struct RuntimeConfig {
@@ -41,7 +49,7 @@ pub fn runtime_config(state: State<'_, RuntimeState>) -> RuntimeConfig {
         seeded: state.seeded,
     }
 }
-async fn pool(app: &AppHandle) -> Result<SqlitePool, String> {
+pub(crate) async fn pool(app: &AppHandle) -> Result<SqlitePool, String> {
     let instances = app.state::<DbInstances>();
     let databases = instances.0.read().await;
     let state = app.state::<RuntimeState>();
@@ -96,6 +104,13 @@ pub async fn seed_database(
         return Err("Unknown fixture version.".into());
     }
     let pool = pool(&app).await?;
+    seed_into(&pool, &version, tables).await
+}
+pub(crate) async fn seed_into(
+    pool: &SqlitePool,
+    version: &str,
+    tables: Vec<SeedTable>,
+) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     // Acquire the write lock before checking the marker: concurrent loads cannot double seed.
     let inserted = sqlx::query(
@@ -165,5 +180,7 @@ pub async fn seed_database(
             query.execute(&mut *tx).await.map_err(|e| e.to_string())?;
         }
     }
+    sqlx::query("UPDATE tasks SET sort_order=(SELECT COUNT(*) FROM tasks p WHERE p.project_id=tasks.project_id AND p.status=tasks.status AND (p.created_at<tasks.created_at OR (p.created_at=tasks.created_at AND p.id<tasks.id)))")
+        .execute(&mut *tx).await.map_err(|e|e.to_string())?;
     tx.commit().await.map_err(|e| e.to_string())
 }

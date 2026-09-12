@@ -16,9 +16,12 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@js-temporal/polyfill": "^0.5.1",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-sql": "^2.4.1",
+    "dompurify": "^3.4.15",
     "lucide-svelte": "^1.0.1",
+    "marked": "^18.0.12",
     "svelte": "^5.57.0"
   },
   "devDependencies": {
@@ -28,6 +31,7 @@
     "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^22.20.2",
     "@types/sql.js": "^1.4.11",
+    "jsdom": "^30.0.1",
     "sql.js": "^1.14.2",
     "svelte-check": "^4.7.6",
     "typescript": "^5.9.3",

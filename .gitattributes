@@ -1,0 +1,3 @@
+# Preserve fixture file bytes and exclude binary formats from text diffs.
+*.pdf binary
+*.png binary
