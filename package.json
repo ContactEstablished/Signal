@@ -1,0 +1,37 @@
+{
+  "name": "signal",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=22.14"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "dev:seed": "tauri dev -- -- --seed",
+    "build": "vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-sql": "^2.4.1",
+    "lucide-svelte": "^1.0.1",
+    "svelte": "^5.57.0"
+  },
+  "devDependencies": {
+    "@fontsource/dm-sans": "^5.3.0",
+    "@fontsource/sora": "^5.3.0",
+    "@sveltejs/vite-plugin-svelte": "^5.1.1",
+    "@tauri-apps/cli": "^2.11.4",
+    "@types/node": "^22.20.2",
+    "@types/sql.js": "^1.4.11",
+    "sql.js": "^1.14.2",
+    "svelte-check": "^4.7.6",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.3",
+    "vitest": "^3.2.7"
+  }
+}

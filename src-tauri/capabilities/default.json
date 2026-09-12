@@ -1,0 +1,5 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main", "description": "Local main window, SQL reads only; mutations use typed Rust commands.",
+  "windows": ["main"], "permissions": ["core:default", "sql:allow-load", "sql:allow-select"]
+}
