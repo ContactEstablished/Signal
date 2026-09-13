@@ -1,6 +1,6 @@
 # Signal
 
-Offline desktop workspace built with Tauri 2, Svelte 5 runes, TypeScript, Vite, and SQLite. **M1 and M2 are complete and manually accepted.** Projects, Board, task editors, attachments, concurrent persisted timers, and manual time logging have production code. The planner remains an M3 preview.
+Offline desktop workspace built with Tauri 2, Svelte 5 runes, TypeScript, Vite, and SQLite. **M1–M3 are complete and manually accepted.** Projects, Board, task editors, attachments, concurrent persisted timers, and manual time logging have production code. Your Day includes scheduling, overlap lanes, block timers, carry-over, quick time/date editing and planning shortcuts. See [M3 verification and final acceptance](docs/verification/M3.md).
 
 Use Node 22.14+, pnpm 10.33.2, Rust stable MSVC, Visual Studio's Desktop development with C++ workload, Windows SDK, and WebView2.
 
@@ -23,9 +23,9 @@ Close the running instance before switching between ordinary and seeded developm
 
 Settings → Notifications → Keep running in the system tray defaults OFF. When enabled, native Close hides Signal; the Signal tray icon → Open restores it, and Quit exits.
 
-See [M1 results, acceptance, and click-paths](docs/verification/M1.md), [M0 verification](docs/verification/M0.md), [approved M1 decisions](docs/Features/Signal/Phase-1-Decisions.md), and [milestone plan](PLAN.md). See [M2 results and final acceptance](docs/verification/M2.md). M3 kickoff is authorized; planner implementation has not begun.
+See [M1 results, acceptance, and click-paths](docs/verification/M1.md), [M0 verification](docs/verification/M0.md), [approved M1 decisions](docs/Features/Signal/Phase-1-Decisions.md), and [milestone plan](PLAN.md). See [M2 results and final acceptance](docs/verification/M2.md). M3 is complete; M4 Today, Week and meeting management kickoff is authorized.
 
-Select a project → Board → New task, or press `n` outside a text field. `Ctrl+Enter` creates; `Ctrl+Shift+Enter` creates and opens the Your Day preview. Open a card to edit fields, subtasks, Markdown notes, tags, alerts, and attachments. The project menu provides edit, reorder, and confirmed permanent deletion.
+Select a project → Board → New task, or press `n` outside a text field. `Ctrl+Enter` creates; `Ctrl+Shift+Enter` creates and opens Your Day to schedule the task. Open a card to edit fields, subtasks, Markdown notes, tags, alerts, and attachments. The project menu provides edit, reorder, and confirmed permanent deletion.
 
 Seeded attachment copies live under `attachments-dev`; ordinary copies use `attachments`, both under Signal's application-data directory. The two bundled fixture files are explicitly synthetic. Deleting an attachment removes the managed copy and preserves its source. Project/task deletion is permanent and requires an affected-record preview; use disposable fixture records for testing.
 

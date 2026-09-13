@@ -189,6 +189,18 @@ pub async fn get_task_time(app: AppHandle, task_id: String) -> Result<Value> {
 pub async fn mutate(
     pool: &SqlitePool,
     kind: &str,
+    input: Value,
+    now: &str,
+    offset: i64,
+) -> Result<Value> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let result = mutate_in_transaction(&mut tx, kind, input, now, offset).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub async fn mutate_in_transaction(
+    conn: &mut SqliteConnection,
+    kind: &str,
     mut input: Value,
     now: &str,
     offset: i64,
@@ -209,15 +221,9 @@ pub async fn mutate(
     payload["kind"] = json!(kind);
     let payload = payload.to_string();
     let now = instant(now)?;
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    one(
-        &mut tx,
-        "SELECT id FROM tasks WHERE id=?",
-        vec![json!(task)],
-    )
-    .await?;
+    one(conn, "SELECT id FROM tasks WHERE id=?", vec![json!(task)]).await?;
     let receipts = rows(
-        &mut tx,
+        conn,
         "SELECT * FROM timer_requests WHERE request_id=?",
         vec![json!(request)],
     )
@@ -227,7 +233,7 @@ pub async fn mutate(
             return Err(AppError::conflict());
         }
         let result = reply(
-            &mut tx,
+            conn,
             &task,
             &now,
             offset,
@@ -235,14 +241,22 @@ pub async fn mutate(
             old["entry_id"].clone(),
         )
         .await?;
-        tx.commit().await?;
         return Ok(result);
     }
     let mut session_id = Value::Null;
     let mut entry_id = Value::Null;
     if kind == "start" {
+        let block = input.get("blockId").cloned().unwrap_or(Value::Null);
+        if !block.is_null() {
+            one(
+                conn,
+                "SELECT id FROM blocks WHERE id=? AND task_id=?",
+                vec![block.clone(), json!(task)],
+            )
+            .await?;
+        }
         let live = rows(
-            &mut tx,
+            conn,
             "SELECT * FROM timer_sessions WHERE task_id=? AND state!='stopped'",
             vec![json!(task)],
         )
@@ -251,7 +265,7 @@ pub async fn mutate(
             session_id = live["id"].clone();
         } else {
             session_id = json!(uid());
-            insert(&mut tx,"timer_sessions",&json!({"id":session_id,"task_id":task,"state":"running","started_at":now,"segment_started_at":now,"accumulated_ms":0,"revision":0})).await?;
+            insert(conn,"timer_sessions",&json!({"id":session_id,"task_id":task,"block_id":block,"state":"running","started_at":now,"segment_started_at":now,"accumulated_ms":0,"revision":0})).await?;
         }
     } else if kind == "log" {
         let duration = input["durationMs"]
@@ -270,12 +284,12 @@ pub async fn mutate(
             ));
         }
         entry_id = json!(uid());
-        insert(&mut tx,"time_entries",&json!({"id":entry_id,"task_id":task,"block_id":null,"started_at":start,"ended_at":end,"minutes":duration as f64/60000.0})).await?;
-        bump(&mut tx, &task, &now).await?;
+        insert(conn,"time_entries",&json!({"id":entry_id,"task_id":task,"block_id":null,"started_at":start,"ended_at":end,"minutes":duration as f64/60000.0})).await?;
+        bump(conn, &task, &now).await?;
     } else {
         session_id = json!(text(&input, "sessionId")?);
         let session = one(
-            &mut tx,
+            conn,
             "SELECT * FROM timer_sessions WHERE id=? AND task_id=?",
             vec![session_id.clone(), json!(task)],
         )
@@ -305,20 +319,19 @@ pub async fn mutate(
                 .filter(|v| *v <= MAX_MS)
                 .ok_or_else(|| AppError::validation("Timer duration overflow."))?;
             match kind {
-    "pause" if state=="running" => execute(&mut tx,"UPDATE timer_sessions SET state='paused',accumulated_ms=?,segment_started_at=NULL,revision=revision+1 WHERE id=?",vec![json!(elapsed),session_id.clone()]).await?,
-    "resume" if state=="paused" => execute(&mut tx,"UPDATE timer_sessions SET state='running',segment_started_at=?,revision=revision+1 WHERE id=?",vec![json!(now),session_id.clone()]).await?,
+    "pause" if state=="running" => execute(conn,"UPDATE timer_sessions SET state='paused',accumulated_ms=?,segment_started_at=NULL,revision=revision+1 WHERE id=?",vec![json!(elapsed),session_id.clone()]).await?,
+    "resume" if state=="paused" => execute(conn,"UPDATE timer_sessions SET state='running',segment_started_at=?,revision=revision+1 WHERE id=?",vec![json!(now),session_id.clone()]).await?,
     "stop" => {
      let start=text(&session,"started_at")?;let end=now.as_str().max(start);entry_id=json!(uid());
-     insert(&mut tx,"time_entries",&json!({"id":entry_id,"task_id":task,"block_id":session["block_id"],"started_at":start,"ended_at":end,"minutes":elapsed as f64/60000.0})).await?;
-     execute(&mut tx,"UPDATE timer_sessions SET state='stopped',segment_started_at=NULL,accumulated_ms=?,ended_at=?,entry_id=?,revision=revision+1 WHERE id=?",vec![json!(elapsed),json!(end),entry_id.clone(),session_id.clone()]).await?;
-     bump(&mut tx,&task,&now).await?;
+     insert(conn,"time_entries",&json!({"id":entry_id,"task_id":task,"block_id":session["block_id"],"started_at":start,"ended_at":end,"minutes":elapsed as f64/60000.0})).await?;
+     execute(conn,"UPDATE timer_sessions SET state='stopped',segment_started_at=NULL,accumulated_ms=?,ended_at=?,entry_id=?,revision=revision+1 WHERE id=?",vec![json!(elapsed),json!(end),entry_id.clone(),session_id.clone()]).await?;
+     bump(conn,&task,&now).await?;
     },_=>()
    }
         }
     }
-    insert(&mut tx,"timer_requests",&json!({"request_id":request,"task_id":task,"kind":kind,"payload_json":payload,"session_id":session_id,"entry_id":entry_id})).await?;
-    let result = reply(&mut tx, &task, &now, offset, session_id, entry_id).await?;
-    tx.commit().await?;
+    insert(conn,"timer_requests",&json!({"request_id":request,"task_id":task,"kind":kind,"payload_json":payload,"session_id":session_id,"entry_id":entry_id})).await?;
+    let result = reply(conn, &task, &now, offset, session_id, entry_id).await?;
     Ok(result)
 }
 async fn command(app: &AppHandle, kind: &str, input: Value) -> Result<Value> {

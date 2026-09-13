@@ -1,3 +1,5 @@
+import { PlannerState } from './planner.svelte';
+import type { PlannerInput } from '../domain/planner';
 import { TimerState } from './timers.svelte';
 import type { TimerAction } from '../domain/timers';
 import type { TimerUiBindings } from '../components/tasks/TaskTimeCard.svelte';
@@ -46,6 +48,7 @@ export class Workspace {
   private refreshQuery = latestQuery();
   private revisions = new Map<string, number>();
   timers = new TimerState();
+  planner = new PlannerState();
   private clock = makeClock();
   private timeBusy = new Set<string>();
   async load() {
@@ -67,6 +70,8 @@ export class Workspace {
         await fixtures.installSeedAttachments();
       }
       this.projects = await commands.listProjects();
+      this.planner.initialize(this.selectedDate, this.timeZone);
+      await this.planner.load(this.timeZone);
     } catch (e) {
       this.error = errorMessage(e);
     } finally {
@@ -77,6 +82,7 @@ export class Workspace {
     const previous = dateAt(this.nowUtc, this.timeZone);
     this.nowUtc = this.clock.nowUtc();
     this.timeZone = this.clock.timeZone;
+    if (this.planner.followToday && this.planner.date) this.planner.date = this.selectedDate;
     if (this.foundation && previous !== dateAt(this.nowUtc, this.timeZone))
       void this.refresh().catch((e) => (this.notice = errorMessage(e)));
   }
@@ -90,6 +96,7 @@ export class Workspace {
     this.board = null;
     this.boardError = '';
     if (this.projects.some((p) => p.id === active)) await this.loadBoard();
+    if (active === 'day') await this.planner.load(this.timeZone);
   }
   async loadBoard() {
     const id = this.active;
@@ -139,6 +146,8 @@ export class Workspace {
       });
     }
     this.projects = projects;
+    if (this.planner.scope !== 'all' && !projects.some(p => p.id === this.planner.scope)) this.planner.scope = 'all';
+    if (this.active === 'day') await this.planner.load(this.timeZone);
     await this.loadBoard();
     if (
       this.refreshQuery.current(ticket) &&
@@ -187,8 +196,10 @@ export class Workspace {
     }
   }
 
-  private mutate<T>(operation: () => Promise<T>): Promise<T> {
+  private mutate<T>(operation: () => Promise<T>, plannerRetry = false): Promise<T> {
     return this.queue.enqueue(async () => {
+      if (!plannerRetry) this.planner.assertWritable();
+      this.planner.invalidate();
       let result: T;
       try {
         result = await operation();
@@ -352,13 +363,14 @@ export class Workspace {
     action: TimerAction,
     log?: { startedAt: string; durationMs: number },
     retry = false,
+    blockId?: string,
   ) {
     if (this.timeBusy.has(id))
       throw new Error('A time action is already pending for this task.');
     this.timeBusy.add(id);
     try {
       await this.mutate(async () => {
-        const result = await this.timers.execute(id, action, log, retry);
+        const result = await this.timers.execute(id, action, log, retry, blockId);
         this.boardQuery.invalidate();
         this.detailQuery.invalidate();
         this.refreshQuery.invalidate();
@@ -368,6 +380,26 @@ export class Workspace {
     } finally {
       this.timeBusy.delete(id);
     }
+  }
+  async plannerAction(action: PlannerInput['action'], payload: Record<string,unknown>, fingerprint?: string) {
+    this.planner.reserve(action,payload,fingerprint);
+    try { return await this.commitPlanner(false); }
+    catch(e) { this.planner.cancelReserved(e); throw e; }
+  }
+  async retryPlanner() {
+    if (this.planner.pending) throw new Error('A planner operation is pending.');
+    return this.commitPlanner(true);
+  }
+  private commitPlanner(retry: boolean) {
+    return this.mutate(async () => {
+      if (Object.values(this.timers.recovery).some(Boolean)) throw new Error('Resolve pending task time with Retry before changing the planner.');
+      await commands.setEditGuard(true);
+      const result = await this.planner.execute(retry);
+      for (const detail of result.changed_details) this.publish(detail);
+      this.timers.publish(result.snapshot.timers);
+      for (const [id,entries] of Object.entries(result.changed_entries)) this.timers.entries[id]=entries;
+      return result;
+    },retry);
   }
   timeBindings(id: string): TimerUiBindings {
     return {

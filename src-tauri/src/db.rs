@@ -41,6 +41,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0003_timers.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "planner_provenance",
+            sql: include_str!("../migrations/0004_planner.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 #[derive(Serialize)]

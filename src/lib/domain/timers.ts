@@ -39,6 +39,7 @@ export interface TimerWriteResult extends TaskTimeSnapshot {
   outcome: { session_id: string | null; entry_id: string | null };
 }
 export interface StartInput {
+  blockId?: string;
   requestId: string;
   taskId: string;
 }

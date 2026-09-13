@@ -1,6 +1,6 @@
 # Signal implementation plan
 
-Status: M0 and M1 complete. On September 12, 2026, the user confirmed all M1 manual acceptance checks passed and authorized the milestone commit and push. See `docs/verification/M1.md` for automated results, native evidence, and user sign-off. M2 is complete and manually accepted on September 13, 2026, including the timer discovery and Board overflow refinements. See `docs/verification/M2.md`. M3 kickoff is authorized; planner decisions are being resolved before implementation.
+Status: M0 and M1 complete. On September 12, 2026, the user confirmed all M1 manual acceptance checks passed and authorized the milestone commit and push. See `docs/verification/M1.md` for automated results, native evidence, and user sign-off. M2 is complete and manually accepted on September 13, 2026, including the timer discovery and Board overflow refinements. See `docs/verification/M2.md`. M3 is complete and manually accepted September 13, 2026; its commit and push are authorized. See `docs/verification/M3.md` for actual automated/native evidence and final user sign-off. M4 kickoff is authorized; its unresolved product decisions are next. Assisted meeting/task intake was requested September 13, 2026 and is recorded below as proposed M8 work.
 
 ## Sources and scope
 
@@ -10,6 +10,7 @@ Status: M0 and M1 complete. On September 12, 2026, the user confirmed all M1 man
 - Precedence: explicit user instructions, then handoff README, then accepted HTML. Unspecified product behavior requires a question before implementation; proposals below are not settled requirements.
 - M0 implementation was explicitly approved with the adjustments recorded in `docs/decisions.md`. M1 execution was subsequently authorized by the user after approval of D1–D8; the four task/spec pairs are complete, with manual acceptance confirmed by the user.
 - Execute M0 through M7 in order, one milestone per review. Stop after each milestone for the user's review before starting the next.
+- The user-requested assisted intake feature is tracked separately as proposed M8. It depends on existing task management and M4 meeting management; its placement can be revisited at kickoff. Adding it to the roadmap does not expand the active M3 scope.
 
 ## Fixed implementation choices
 
@@ -22,6 +23,7 @@ Status: M0 and M1 complete. On September 12, 2026, the user confirmed all M1 man
 - Markdown uses `marked` followed by sanitization. External links open through a narrow native boundary. Attachment operations copy files into application data, with database metadata pointing to the copied file.
 - Pure TypeScript domain functions are independent of Svelte and native APIs. Vitest covers lane packing, carry-over, timer math, and summary generation. No E2E suite.
 - Offline single-user operation: no accounts, OAuth, provider APIs, remote title fetching, telemetry, or remote assets. Email uses `mailto:` in M5; SMTP is later work outside M0–M7.
+- M8's screenshot/text interpretation needs a separate processing decision: local models/OCR or an explicitly configured external service. No provider, credentials, cost, network dependency, or change to the offline baseline is approved by this roadmap addition. Ordinary task, meeting, and planner workflows must remain usable without the optional interpreter.
 
 ## Intended folder structure
 
@@ -197,9 +199,12 @@ Execution status: **complete and manually accepted September 13, 2026.** All thr
 
 ### M3 — Your Day (`#2a`, `#2b`, `#3e` right)
 
+Execution status: **complete and manually accepted September 13, 2026.** D1–D8 and all three task/spec pairs are implemented, including the accepted editor, Due soon, completed/empty-day and Quick add refinements. Latest full checks pass 79 frontend and 27 Rust tests; final affected frontend checks, type/build/Rust checks and standalone Tauri debug build pass. The user verified and approved M3 and authorized commit/push. See `docs/verification/M3.md` for evidence and historical automation limitations. M4 kickoff is now authorized.
+
 - Build the date/scope sub-bar, 24h scrolling planner at 60px/hour, 64px gutter, initial 07:00 scroll, past shade, orange now line, fades, and 320px sidebar with 20px gap.
 - Implement drag selection with 15-minute snap, selection preview, 360px task picker, search, keyboard navigation, cancellation/removal, and task/break/lunch/focus creation.
 - Implement move/resize, done toggles, linked task detail, active timer pause/stop, run-over indicator, and the specified offer to move a task to Done.
+- User review refinement (September 13, 2026): provide ±15-minute Start/End controls, 30/60/90/120-minute duration shortcuts, and a date picker beneath the time fields. Saving an explicit date change moves the same block and opens its destination day, preserving task due dates and timer/history associations.
 - Project task/meeting visuals from their own colors; neutral break/lunch; finalize unspecified focus treatment before styling it.
 - Implement pure greedy lane packing for concurrent planner items, equal lane widths and 4px gaps, with content collapsed at 4+ lanes. Resolve the README's three-lane wording gap before implementation.
 - Implement Quick add durations 30/60/60, due-soon drag-in sized to remaining estimate capped at 2h, unscheduled rows, leftovers/done lists, and approved footer statistics.
@@ -255,6 +260,20 @@ Execution status: **complete and manually accepted September 13, 2026.** All thr
 - Verify: first launch → create project/import CSV → palette jump/new task/start timer/summary → export database → change local data → import approved backup → verify restored entities and agreed attachment behavior.
 - Intended commit: `feat(polish): complete keyboard onboarding import and backup flows`.
 
+### M8 — Assisted meeting and task intake (proposed placement)
+
+Feature requested September 13, 2026. Provide a dedicated screen that turns user-supplied screenshots, text files, or pasted notes into editable meeting/task candidates for a selected project. The user can supply instructions such as “Convert these into meeting entries for the Atlas Migration project” or “Build tasks based on these comments for the Website Refresh project.” This is roadmap scope, not an approved implementation specification or an addition to M3.
+
+- **Input:** drop or choose a screenshot or text file, or paste text into a form. Include a project selector, a meeting/task choice, and a free-text instruction field. Resolve an absent or ambiguous project before saving; do not silently create a project from a name in the source.
+- **Interpretation:** extract the best supported meeting/task candidates from the supplied content and instructions. For meetings, suggest title, date/time, duration, link, and agenda where available. For tasks, suggest title, notes, subtasks, due date, priority, and estimate where supported. Leave missing optional details blank or apply clearly identified existing defaults; do not invent links, deadlines, estimates, or meeting times as if they appeared in the source.
+- **Review:** show the source beside editable candidate rows, with uncertain readings, assumptions, and missing fields identified. Let the user correct fields, change the target project, exclude candidates, and add details before creating selected records. Unclear dates, timezone, AM/PM, or recurrence must remain visible for resolution. A meeting with no valid start/duration stays a candidate until those required fields are supplied; optional details can be completed later in the normal meeting/task editor.
+- **Creation:** create the reviewed selection through the existing native validation and transaction boundaries. Use repeat-safe request identities, report possible duplicates against existing records, and show exactly what was created. Canceling a preview creates no business records; retrying an interrupted creation must not duplicate them. Importing meetings must not also create duplicate planner blocks.
+- **Follow-up:** link each created record to its existing task or meeting editor so the user can fill in more details. Refresh Board, Today, Week, and Your Day using the normal project/date rules.
+- **Failure and recovery:** preserve editable candidates when interpretation or validation fails, allow partial source recognition to be reviewed, and report unreadable content or unsupported files clearly. Define draft/source retention and restart recovery at kickoff.
+- **Boundary:** reuse M1 task creation and M4 meeting creation/recurrence validation. Keep M7's structured CSV importer distinct. This feature does not synchronize an external calendar, invite attendees, fetch linked documents, or execute instructions found inside imported content.
+- **Verification:** screenshot plus project instruction → review meeting candidates → correct an ambiguous time → create selected meetings → open one to add details; repeat with a text file and pasted comments to create tasks. Test unreadable/partial input, missing dates, project isolation, duplicate/retry handling, cancellation, processing failure, persistence across restart, and ordinary offline use without the interpreter.
+- Intended commit, after implementation and verification: `feat(intake): create reviewed meetings and tasks from screenshots and text`.
+
 ## Required milestone completion gate
 
 1. Run `pnpm check` and `pnpm test`; report actual outcomes. Before domain tests arrive, clearly report that no domain tests exist, instead of adding meaningless tests to make a green count.
@@ -290,6 +309,12 @@ These questions identify gaps rather than granting permission to invent behavior
 - Define summary deduplication, weekend meaning of Yesterday, source-toggle mapping for meetings, since-date history, treatment of non-task blocks, and sent status after Copy/`mailto:`. The README says tabs only for manager projects, so the mock's self-summary CLI tab does not override it. Confirm whether separate project Notes/self summaries are required.
 - Define missed-notification handling after sleep/quiet hours, snooze persistence, and whether close-to-tray stays opt-in in M6. Confirm how the UI records sent summaries so reminders can stop reliably.
 - Supply/approve CSV formats and mappings, duplicate policy, import preview/error copy, backup replacement behavior, and whether attachment files must travel with the SQLite export.
+
+### Before M8 — assisted intake
+
+- Confirm milestone placement and provide representative screenshots/text for extraction and review acceptance. There is no accepted handoff screen for this new feature; design its screen and review flow at kickoff.
+- Choose local OCR/model processing versus an optional external model service, including installation or configuration, credentials if applicable, expected cost, source-data handling, and behavior when processing is unavailable. Preserve the offline core; do not select or integrate a provider silently.
+- Define supported image/text formats, size limits, multi-file handling, relative-date reference date/timezone, recurrence suggestions, candidate defaults, duplicate matching, and whether candidate/source drafts persist across restart or become record attachments.
 
 ## Approval boundary
 

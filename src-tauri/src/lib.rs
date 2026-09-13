@@ -3,6 +3,7 @@ mod clock;
 mod db;
 mod exit_guard;
 mod links;
+mod planner;
 mod timers;
 mod tray;
 mod window;
@@ -37,6 +38,8 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            planner::get_planner,
+            planner::apply_planner,
             timers::initialize_timers,
             timers::get_timers,
             timers::get_task_time,

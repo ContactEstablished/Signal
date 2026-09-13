@@ -7,18 +7,9 @@ pub async fn database() -> SqlitePool {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::raw_sql(include_str!("../../migrations/0001_initial.sql"))
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::raw_sql(include_str!("../../migrations/0002_board_fields.sql"))
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::raw_sql(include_str!("../../migrations/0003_timers.sql"))
-        .execute(&pool)
-        .await
-        .unwrap();
+    for migration in crate::db::migrations() {
+        sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+    }
     pool
 }
 pub async fn project(pool: &SqlitePool) -> String {

@@ -70,6 +70,7 @@ export class TimerState {
     action: TimerAction,
     log?: { startedAt: string; durationMs: number },
     retry = false,
+    blockId?: string,
   ): Promise<TimerWriteResult> {
     let intent = this.intents.get(id);
     if (this.recovery[id] && !retry) {
@@ -90,6 +91,7 @@ export class TimerState {
       const input: StartInput = {
         requestId: crypto.randomUUID(),
         taskId: id,
+        ...(action === 'start' && blockId ? { blockId } : {}),
       };
       if (action === 'log') {
         if (!log) throw new Error('Enter time to log.');

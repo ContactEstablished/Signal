@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StartInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
     pub request_id: String,
     pub task_id: String,
 }

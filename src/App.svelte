@@ -2,7 +2,9 @@
 
 <script lang="ts">
   import TimerStatus from './lib/components/shell/TimerStatus.svelte';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
+  import YourDay from './lib/views/YourDay.svelte';
+  import type { TaskDetail } from './lib/domain/types';
   import {
     Search,
     Plus,
@@ -38,7 +40,13 @@
     workspace.projects.find((p) => p.id === active),
   );
   const heading = $derived(active === 'today' ? 'Today' : 'Your Day');
+  let day = $state<YourDay>(null!);
+  let createdTask: TaskDetail | null = null;
   let board = $state<Board>(null!);
+  $effect(() => {
+    const guarded = !!workspace.editor || workspace.planner.guarded || Object.values(workspace.timers.pending).some(Boolean) || Object.values(workspace.timers.recovery).some(Boolean);
+    void commands.setEditGuard(guarded).catch(e => workspace.notice = errorMessage(e));
+  });
   let projectDialog = $state<ProjectDialog>(null!);
   let newDialog = $state<NewTaskDialog>(null!);
   let detailDialog = $state<TaskDetailDialog>(null!);
@@ -80,12 +88,14 @@
     closing = (async () => {
       try {
         const editor = currentEditor();
-        const proceed = editor ? await editor.requestClose(reason) : true;
+        let proceed = editor ? await editor.requestClose(reason) : true;
+        if (proceed && day) proceed = await day.requestClose(reason);
+        if (workspace.planner.recovery || Object.values(workspace.timers.recovery).some(Boolean)) proceed = false;
         await workspace.settled();
         if (pendingExitId)
           await commands.resolveExitRequest(pendingExitId, proceed);
         else if (proceed && workspace.editor)
-          await commands.setEditGuard(false);
+          await commands.setEditGuard(workspace.planner.guarded);
         if (proceed) {
           workspace.editor = null;
           workspace.detail = null;
@@ -131,13 +141,14 @@
     }
   }
   async function openNew() {
-    if (!selectedProject) return;
+    const project = selectedProject ?? workspace.projects.find(p => p.id === workspace.planner.scope) ?? workspace.projects[0];
+    if (!project) return;
     if (!(await closeEditor('navigation'))) return;
     try {
       trigger = document.activeElement as HTMLElement;
       await commands.setEditGuard(true);
       workspace.staged = [];
-      workspace.editor = { kind: 'new', projectId: selectedProject.id };
+      workspace.editor = { kind: 'new', projectId: project.id };
     } catch (e) {
       workspace.notice = errorMessage(e);
     }
@@ -177,8 +188,8 @@
     if (await closeEditor()) {
       if (plan) {
         await workspace.select('day');
-        workspace.notice =
-          'Task created. Your Day planning arrives in M3; no block was scheduled.';
+        await tick();
+        if (createdTask) day?.planTask(createdTask.task.id);
       }
     }
   }
@@ -461,6 +472,8 @@
       {/if}
     </section>
   </main>
+{:else if active === 'day'}
+  <YourDay bind:this={day} {workspace} onOpenTask={openTask} onNewTask={openNew} onJoin={commands.openExternalUrl} onSummary={() => stub('Daily summary', 'Summary generation arrives in M5.')} />
 {:else if selectedProject}
   <main class="page project-page">
     <ProjectSubBar
@@ -573,7 +586,7 @@
     tags={workspace.board?.tags ?? []}
     timeZone={workspace.timeZone}
     stagedAttachments={workspace.staged}
-    onCreate={(input) => workspace.createTask(input)}
+    onCreate={async (input) => { createdTask = await workspace.createTask(input); return createdTask; }}
     onCreated={(plan) => void created(plan)}
     onStage={(paths) => workspace.stage(paths)}
     onDiscardStaged={(tokens) => workspace.discard(tokens)}

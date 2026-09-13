@@ -30,6 +30,7 @@ pub async fn graph(conn: &mut SqliteConnection, target: &DeletionTarget) -> Resu
     for name in [
         "timer_sessions",
         "timer_requests",
+        "planner_claims",
         "subtasks",
         "task_tags",
         "attachments",
@@ -124,6 +125,7 @@ pub async fn preview(pool: &SqlitePool, target: &DeletionTarget) -> Result<Value
         .filter_map(|(k, v)| v.as_array().map(|a| (k.clone(), json!(a.len()))))
         .collect();
     counts.remove("timer_requests");
+    counts.remove("planner_claims");
     let sessions = data["timer_sessions"].as_array().unwrap();
     counts.insert(
         "timer_sessions".into(),
@@ -149,7 +151,7 @@ pub async fn remove(
     for v in data["detached_blocks"].as_array().unwrap() {
         execute(
             &mut tx,
-            "UPDATE blocks SET carried_from_block_id=NULL WHERE id=?",
+            "UPDATE blocks SET carried_from_block_id=NULL,revision=revision+1 WHERE id=?",
             vec![v["id"].clone()],
         )
         .await?;
@@ -158,6 +160,14 @@ pub async fn remove(
         execute(
             &mut tx,
             "UPDATE time_entries SET block_id=NULL WHERE id=?",
+            vec![v["id"].clone()],
+        )
+        .await?;
+    }
+    for v in data["planner_claims"].as_array().unwrap() {
+        execute(
+            &mut tx,
+            "DELETE FROM planner_claims WHERE id=?",
             vec![v["id"].clone()],
         )
         .await?;
@@ -220,7 +230,7 @@ pub async fn remove(
     for v in data["blocks"].as_array().unwrap() {
         execute(
             &mut tx,
-            "UPDATE blocks SET carried_from_block_id=NULL WHERE id=?",
+            "UPDATE blocks SET carried_from_block_id=NULL,revision=revision+1 WHERE id=?",
             vec![v["id"].clone()],
         )
         .await?;
