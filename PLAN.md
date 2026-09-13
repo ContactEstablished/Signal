@@ -1,6 +1,6 @@
 # Signal implementation plan
 
-Status: M0 and M1 complete. On September 12, 2026, the user confirmed all M1 manual acceptance checks passed and authorized the milestone commit and push. See `docs/verification/M1.md` for automated results, native evidence, and user sign-off. M2 is not started.
+Status: M0 and M1 complete. On September 12, 2026, the user confirmed all M1 manual acceptance checks passed and authorized the milestone commit and push. See `docs/verification/M1.md` for automated results, native evidence, and user sign-off. M2 is complete and manually accepted on September 13, 2026, including the timer discovery and Board overflow refinements. See `docs/verification/M2.md`. M3 kickoff is authorized; planner decisions are being resolved before implementation.
 
 ## Sources and scope
 
@@ -169,7 +169,7 @@ M0 is complete. `pnpm check`, six meaningful foundation tests, production fronte
 
 ### M1 — Projects & Board (`#1b`, `#3a`)
 
-Execution status: complete. All four task/spec pairs are implemented, automated checks pass, and the user confirmed all manual acceptance checks on September 12, 2026. The milestone commit and push are authorized. Evidence and remaining later-phase stubs are recorded in `docs/verification/M1.md`. M2 has not begun.
+Execution status: complete. All four task/spec pairs are implemented, automated checks pass, and the user confirmed all manual acceptance checks on September 12, 2026. The milestone commit and push are authorized. Evidence and remaining later-phase stubs are recorded in `docs/verification/M1.md`. M2 execution was subsequently authorized; see its status below.
 
 - Implement project create/read/update/delete and sort using the approved edit/delete interaction; offer cyan/lime/magenta/violet by default, excluding orange.
 - Build Board/Week/Notes sub-bar, specified filter/group affordances, 5 equal status columns (14px gaps), database counts, and cards with exact chip/due/progress/blocked/done/selected treatments.
@@ -183,9 +183,11 @@ Execution status: complete. All four task/spec pairs are implemented, automated 
 
 ### M2 — Timers & time entries
 
+Execution status: **complete and manually accepted September 13, 2026.** All three task/spec pairs and follow-up timer discovery/Board overflow corrections are implemented, with 52 frontend and 18 Rust tests passing. Native and user verification, including resolved PNG default-viewer behavior, are recorded in `docs/verification/M2.md`. Completion commit: `feat(timers): persist concurrent timers and logged time`. No push authorized. M3 kickoff is now authorized.
+
 - Implement a persisted one-timer-per-task state machine supporting concurrent tasks and the approved pause/resume semantics.
 - Derive elapsed time from persisted timestamps; repaint each second without accumulating tick drift. Restore accurately after restart and while hidden.
-- Display running elapsed time as `HH:MM:SS` (for example `00:02:17`), with visibly advancing seconds. Explicit user preference recorded September 12, 2026; this remains M2 work.
+- Display running elapsed time as `HH:MM:SS` (for example `00:02:17`), with visibly advancing seconds. Explicit user preference recorded September 12, 2026; implemented in M2.
 - Stop atomically appends a completed time entry and clears/finalizes timer state exactly once; manual Log writes entries through the same time accounting boundary.
 - Update derived hours, progress displays, header singular/plural timer chip, and tray tooltip. Associate entries with a block when started from a block in M3.
 - Unit tests: simultaneous tasks, duplicate start/stop, elapsed time after restart, paused intervals, fractional minutes, and approved clock/sleep behavior.

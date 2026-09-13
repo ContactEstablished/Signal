@@ -40,3 +40,36 @@ pub fn setup(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .build(app)?;
     Ok(())
 }
+
+/// Read current committed counts under one presentation gate so older updates cannot win.
+pub async fn refresh(app: &tauri::AppHandle) -> crate::workspace::models::Result<()> {
+    use crate::workspace::models::{rows, AppError};
+    let state = app.state::<crate::clock::Clock>();
+    let _gate = state.tray_gate.lock().await;
+    let pool = crate::db::pool(app)
+        .await
+        .map_err(|e| AppError::new("Database", e))?;
+    let mut conn = pool.acquire().await?;
+    let counts = rows(
+        &mut conn,
+        "SELECT state,COUNT(*) AS n FROM timer_sessions WHERE state!='stopped' GROUP BY state",
+        vec![],
+    )
+    .await?;
+    let mut parts = vec!["Signal".to_string()];
+    for state in ["running", "paused"] {
+        if let Some(row) = counts.iter().find(|v| v["state"] == state) {
+            let n = row["n"].as_i64().unwrap_or(0);
+            if n > 0 {
+                parts.push(format!(
+                    "{n} timer{} {state}",
+                    if n == 1 { "" } else { "s" }
+                ));
+            }
+        }
+    }
+    app.tray_by_id("signal-tray")
+        .ok_or_else(|| AppError::new("Database", "Tray unavailable."))?
+        .set_tooltip(Some(parts.join(" · ")))
+        .map_err(|e| AppError::new("Database", e.to_string()))
+}

@@ -3,6 +3,7 @@ import { beforeAll, afterEach, it, expect, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import NewTaskDialog from '../../src/lib/components/tasks/NewTaskDialog.svelte';
 import TaskDetailDialog from '../../src/lib/components/tasks/TaskDetailDialog.svelte';
+import type { TimerUiBindings } from '../../src/lib/components/tasks/TaskTimeCard.svelte';
 import TaskFields from '../../src/lib/components/tasks/TaskFields.svelte';
 import { newTaskDraft } from '../../src/lib/domain/task-draft';
 import type { TaskDetail, ProjectRecord } from '../../src/lib/domain/types';
@@ -62,15 +63,13 @@ function input(selector: string, text: string) {
   return el;
 }
 function create() {
-  document
-    .querySelector('dialog')!
-    .dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'Enter',
-        ctrlKey: true,
-        bubbles: true,
-      }),
-    );
+  document.querySelector('dialog')!.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Enter',
+      ctrlKey: true,
+      bubbles: true,
+    }),
+  );
 }
 it('creates a pasted Markdown link once, closes cleanly, and ignores repeated completion shortcuts', async () => {
   const { onCreate, onCreated, editor } = form();
@@ -126,8 +125,11 @@ it('protects unadded child text on close and returns to editing on Escape', asyn
     .dispatchEvent(new Event('cancel', { cancelable: true }));
   expect(await close).toBe(false);
   expect(
-    (document.querySelector('[aria-label="New subtask"]') as HTMLInputElement)
-      .value,
+    (
+      document.querySelector(
+        '[aria-label="New subtask"]',
+      ) as HTMLInputElement
+    ).value,
   ).toBe('Do not lose this');
 });
 it('keeps estimate validation independent from changing the due date', () => {
@@ -158,7 +160,10 @@ it('keeps estimate validation independent from changing the due date', () => {
   expect(invalid).toHaveBeenLastCalledWith(false);
 });
 
-function detailForm(onPatch: ReturnType<typeof vi.fn>) {
+function detailForm(
+  onPatch: ReturnType<typeof vi.fn>,
+  time?: TimerUiBindings,
+) {
   const d: TaskDetail = {
     task: {
       ...newTaskDraft('p'),
@@ -185,6 +190,7 @@ function detailForm(onPatch: ReturnType<typeof vi.fn>) {
     target,
     props: {
       detail: d,
+      time,
       tags: [],
       timeZone: 'America/New_York',
       stagedAttachments: [],
@@ -195,11 +201,17 @@ function detailForm(onPatch: ReturnType<typeof vi.fn>) {
       onStage: async () => [],
       onDiscardStaged: async () => ({ cleanupPending: false }),
       onAttach: async () => d,
-      onRemoveAttachment: async () => ({ detail: d, cleanupPending: false }),
+      onRemoveAttachment: async () => ({
+        detail: d,
+        cleanupPending: false,
+      }),
       onOpenAttachment: async () => {},
       onOpenTaskLink: async () => {},
       onOpenExternalUrl: async () => {},
-      onPreviewDeletion: async () => ({ counts: {}, fingerprint: 'preview' }),
+      onPreviewDeletion: async () => ({
+        counts: {},
+        fingerprint: 'preview',
+      }),
       onDeleteEntity: async () => ({ cleanupPending: false }),
       onDeleted: () => {},
       onClose: () => {},
@@ -210,7 +222,9 @@ function detailForm(onPatch: ReturnType<typeof vi.fn>) {
 }
 it('waits for a pending field write on native close and commits Enter/blur only once', async () => {
   let resolve!: (value: TaskDetail) => void;
-  const onPatch = vi.fn(() => new Promise<TaskDetail>((r) => (resolve = r)));
+  const onPatch = vi.fn(
+    () => new Promise<TaskDetail>((r) => (resolve = r)),
+  );
   const { d, editor } = detailForm(onPatch);
   const title = input('.title', 'Changed');
   title.focus();
@@ -255,4 +269,74 @@ it('retains failed detail edits and cancellation consumes Escape without closing
   );
   flushSync();
   expect(title.value).toBe('Original');
+});
+
+it('protects an unsent Log draft before closing', async () => {
+  const time: TimerUiBindings = {
+    session: null,
+    entries: [],
+    nowUtc: '2025-09-11T12:00:00Z',
+    timeZone: 'UTC',
+    loading: false,
+    error: '',
+    pending: false,
+    recoveryRequired: false,
+    logCompletionVersion: 0,
+    onStart: async () => {},
+    onPause: async () => {},
+    onResume: async () => {},
+    onStop: async () => {},
+    onLog: async () => {},
+    onRetry: async () => {},
+  };
+  const { editor } = detailForm(vi.fn(), time);
+  [...document.querySelectorAll('button')]
+    .find((b) => b.textContent?.trim() === 'Log time')!
+    .click();
+  flushSync();
+  input('[aria-label="Log start time"]', '10:00');
+  const closing = editor.requestClose('native-quit');
+  await vi.waitFor(() =>
+    expect(document.body.textContent).toContain('Unsaved task changes'),
+  );
+  [...document.querySelectorAll('button')]
+    .find((b) => b.textContent?.trim() === 'Keep editing')!
+    .click();
+  expect(await closing).toBe(false);
+  expect(
+    document.querySelector<HTMLInputElement>(
+      '[aria-label="Log start time"]',
+    )?.value,
+  ).toBe('10:00');
+});
+
+it('blocks native Close and Quit while a time result is unknown and leaves Retry available', async () => {
+  const retry = vi.fn().mockResolvedValue(undefined);
+  const time: TimerUiBindings = {
+    session: null,
+    entries: [],
+    nowUtc: '2025-09-11T12:00:00Z',
+    timeZone: 'UTC',
+    loading: false,
+    error: 'The result is unknown.',
+    pending: false,
+    recoveryRequired: true,
+    logCompletionVersion: 0,
+    onStart: async () => {},
+    onPause: async () => {},
+    onResume: async () => {},
+    onStop: async () => {},
+    onLog: async () => {},
+    onRetry: retry,
+  };
+  const { editor } = detailForm(vi.fn(), time);
+  expect(await editor.requestClose('native-close')).toBe(false);
+  expect(await editor.requestClose('native-quit')).toBe(false);
+  flushSync();
+  const button = [...document.querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === 'Retry time operation',
+  )!;
+  expect(button.disabled).toBe(false);
+  button.click();
+  await vi.waitFor(() => expect(retry).toHaveBeenCalledTimes(1));
 });

@@ -15,6 +15,10 @@ pub async fn database() -> SqlitePool {
         .execute(&pool)
         .await
         .unwrap();
+    sqlx::raw_sql(include_str!("../../migrations/0003_timers.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
     pool
 }
 pub async fn project(pool: &SqlitePool) -> String {

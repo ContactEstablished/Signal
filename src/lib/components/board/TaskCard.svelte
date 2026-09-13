@@ -1,7 +1,7 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
-  import { GripVertical, ChevronDown } from 'lucide-svelte';
+  import { GripVertical, ChevronDown, Timer } from 'lucide-svelte';
   import {
     statuses,
     statusLabels,
@@ -15,6 +15,7 @@
     timeZone,
     selected = false,
     pending = false,
+    running = false,
     preview = null,
     dragSource = false,
     onOpen,
@@ -26,6 +27,7 @@
     timeZone: string;
     selected?: boolean;
     pending?: boolean;
+    running?: boolean;
     preview?: 'drag' | 'drop' | null;
     dragSource?: boolean;
     onOpen: () => void;
@@ -49,9 +51,13 @@
   <button
     class="card-open"
     onclick={onOpen}
-    aria-label={`Open ${task.title}`}
+    aria-label={`Open ${task.title}${running ? ', timer running' : ''}`}
     disabled={pending || !!preview}
-    ><span class="title">{task.title}</span>
+    ><span class="title"
+      >{#if running}<span class="running-indicator" title="Timer running"
+          ><Timer aria-label="Timer running" /></span
+        >{/if}{task.title}</span
+    >
     <span class="meta"
       ><span class="chips"
         ><span class="id"
@@ -63,7 +69,8 @@
         >{dueLabel(task.due_at, timeZone)}</span
       ></span
     >
-    {#if task.estimate_h !== null || task.hours_worked > 0}<span class="time"
+    {#if task.estimate_h !== null || task.hours_worked > 0}<span
+        class="time"
         ><span class="progress"
           ><span
             style:width={`${progress(task.hours_worked, task.estimate_h)}%`}
@@ -74,8 +81,8 @@
           })}{task.estimate_h !== null ? `/${task.estimate_h}` : ''}h</span
         ></span
       >{/if}
-    {#if task.status === 'blocked' && task.blocked_reason}<span class="reason"
-        >{task.blocked_reason}</span
+    {#if task.status === 'blocked' && task.blocked_reason}<span
+        class="reason">{task.blocked_reason}</span
       >{/if}
   </button>
   {#if !preview}<div class="card-actions">
@@ -159,6 +166,12 @@
     line-height: var(--leading-card);
     overflow-wrap: anywhere;
   }
+  .running-indicator {
+    display: inline-flex;
+    vertical-align: middle;
+    margin-right: var(--space-tight);
+    color: var(--lime);
+  }
   .done .title {
     text-decoration: line-through;
   }
@@ -231,6 +244,9 @@
     display: flex;
   }
   .card-actions select {
+    /* Fit the invisible native control inside its 16px icon hit target. */
+    padding: 0;
+    border: 0;
     position: absolute;
     inset: 0;
     opacity: 0;

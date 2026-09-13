@@ -1,7 +1,9 @@
 mod attachments;
+mod clock;
 mod db;
 mod exit_guard;
 mod links;
+mod timers;
 mod tray;
 mod window;
 mod workspace;
@@ -23,6 +25,7 @@ pub fn run() {
             seeded: requested_seed,
             close_to_tray: AtomicBool::new(false),
         })
+        .manage(clock::Clock::default())
         .manage(window::GeometryReady::default())
         .manage(exit_guard::EditGuard::default())
         .plugin(tauri_plugin_dialog::init())
@@ -34,6 +37,14 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            timers::initialize_timers,
+            timers::get_timers,
+            timers::get_task_time,
+            timers::start_timer,
+            timers::pause_timer,
+            timers::resume_timer,
+            timers::stop_timer,
+            timers::log_time,
             db::runtime_config,
             db::load_tray_preference,
             db::set_tray_preference,

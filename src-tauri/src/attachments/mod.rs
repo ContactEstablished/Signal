@@ -197,15 +197,15 @@ async fn pool(app: &AppHandle) -> Result<SqlitePool> {
         .await
         .map_err(|e| AppError::new("Database", e))
 }
-fn clock(app: &AppHandle) -> String {
-    now(app.state::<crate::db::RuntimeState>().seeded)
+fn clock(app: &AppHandle) -> Result<String> {
+    Ok(crate::clock::sample(app)?.0)
 }
 #[tauri::command]
 pub async fn initialize_workspace(app: AppHandle) -> Result<()> {
     let pool = pool(&app).await?;
     let files = app.state::<Files>();
     let _gate = files.gate.lock().await;
-    files.recover(&pool, &clock(&app)).await
+    files.recover(&pool, &clock(&app)?).await
 }
 #[tauri::command]
 pub async fn stage_attachments(app: AppHandle, paths: Option<Vec<String>>) -> Result<Value> {
@@ -226,14 +226,14 @@ pub async fn stage_attachments(app: AppHandle, paths: Option<Vec<String>>) -> Re
     let pool = pool(&app).await?;
     let files = app.state::<Files>();
     let _gate = files.gate.lock().await;
-    files.stage(&pool, paths, &clock(&app)).await
+    files.stage(&pool, paths, &clock(&app)?).await
 }
 #[tauri::command]
 pub async fn discard_staged_attachments(app: AppHandle, tokens: Vec<String>) -> Result<Value> {
     let pool = pool(&app).await?;
     let files = app.state::<Files>();
     let _gate = files.gate.lock().await;
-    Ok(json!({"cleanupPending":files.discard(&pool,&tokens,&clock(&app)).await?}))
+    Ok(json!({"cleanupPending":files.discard(&pool,&tokens,&clock(&app)?).await?}))
 }
 #[tauri::command]
 pub async fn add_attachments(
@@ -249,7 +249,7 @@ pub async fn add_attachments(
     check_revision(&mut tx, &task_id, expected_revision).await?;
     adopt(&mut tx, &task_id, &tokens).await?;
     if tokens.as_array().is_some_and(|a| !a.is_empty()) {
-        bump(&mut tx, &task_id, &clock(&app)).await?;
+        bump(&mut tx, &task_id, &clock(&app)?).await?;
     }
     let reply = detail(&mut tx, &task_id).await?;
     tx.commit().await?;
@@ -264,7 +264,7 @@ pub async fn remove_attachment(
     let pool = pool(&app).await?;
     let files = app.state::<Files>();
     let _gate = files.gate.lock().await;
-    let now = clock(&app);
+    let now = clock(&app)?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let file = one(
         &mut tx,
@@ -352,7 +352,7 @@ pub async fn install_fixture_attachments(app: AppHandle, fixtures: Vec<FixtureFi
     let pool = pool(&app).await?;
     let files = app.state::<Files>();
     let _gate = files.gate.lock().await;
-    let now = clock(&app);
+    let now = clock(&app)?;
     let mut conn = pool.acquire().await?;
     if !rows(
         &mut conn,

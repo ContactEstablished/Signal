@@ -1,6 +1,7 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
+  import TimerStatus from './lib/components/shell/TimerStatus.svelte';
   import { onMount } from 'svelte';
   import {
     Search,
@@ -141,11 +142,13 @@
       workspace.notice = errorMessage(e);
     }
   }
-  async function openTask(taskId: string) {
+  async function openTask(taskId: string, revealProject = false) {
     if (!(await closeEditor('navigation'))) return;
     try {
       trigger = document.activeElement as HTMLElement;
-      await workspace.loadDetail(taskId);
+      const detail = await workspace.loadDetail(taskId);
+      if (revealProject)
+        await workspace.select(detail.task.project_id, 'board');
       await commands.setEditGuard(true);
       workspace.staged = [];
       workspace.editor = { kind: 'detail', taskId };
@@ -205,7 +208,7 @@
     )
       .then((unlisten) => (disposed ? unlisten() : cleanup.push(unlisten)))
       .catch((e) => (workspace.notice = errorMessage(e)));
-    const tick = setInterval(() => workspace.tick(), 60000);
+    const tick = setInterval(() => workspace.tick(), 1000);
     const focus = () => {
       workspace.tick();
       if (workspace.foundation)
@@ -213,7 +216,11 @@
           .refresh()
           .catch((e) => (workspace.notice = errorMessage(e)));
     };
+    const visibility = () => {
+      if (document.visibilityState === 'visible') focus();
+    };
     window.addEventListener('focus', focus);
+    document.addEventListener('visibilitychange', visibility);
     if (import.meta.env.DEV)
       void document.fonts.ready.then(() =>
         console.info(
@@ -240,6 +247,7 @@
       cleanup.forEach((fn) => fn());
       clearInterval(tick);
       window.removeEventListener('focus', focus);
+      document.removeEventListener('visibilitychange', visibility);
     };
   });
   function stub(title: string, text: string, isPalette = false) {
@@ -251,7 +259,10 @@
     modal.showModal();
   }
   function keyboard(event: KeyboardEvent) {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === 'k'
+    ) {
       event.preventDefault();
       if (!modal.open && !workspace.editor)
         stub(
@@ -331,6 +342,11 @@
     >
   </nav>
   <div class="header-actions">
+    <TimerStatus
+      sessions={workspace.timers.sessions}
+      nowUtc={workspace.nowUtc}
+      onOpen={(id) => void openTask(id, true)}
+    />
     <button
       class="search"
       aria-label="Open command palette"
@@ -339,7 +355,8 @@
           'Search or jump to…',
           'Command palette preview. Search results and actions arrive in M7.',
           true,
-        )}><Search /><span>Search or jump to…</span><kbd>Ctrl K</kbd></button
+        )}
+      ><Search /><span>Search or jump to…</span><kbd>Ctrl K</kbd></button
     >
     <button
       class="settings-button"
@@ -356,7 +373,8 @@
       onclick={() =>
         void workspace
           .refresh()
-          .catch((e) => (workspace.notice = errorMessage(e)))}>Refresh</button
+          .catch((e) => (workspace.notice = errorMessage(e)))}
+      >Refresh</button
     ><button
       aria-label="Dismiss message"
       onclick={() => (workspace.notice = '')}><X /></button
@@ -427,8 +445,8 @@
           <div>
             <h2>Notification settings preview</h2>
             <p>
-              Reminders, toast notifications, sounds, and timer actions arrive
-              in M6.
+              Reminders, toast notifications, sounds, and timer actions
+              arrive in M6.
             </p>
           </div>
         </div>
@@ -456,11 +474,17 @@
       onMove={(direction) =>
         workspace.moveProject(selectedProject.id, direction)}
       onPreviewDeletion={commands.previewDeletion}
-      onDelete={(target, fingerprint) => workspace.delete(target, fingerprint)}
+      onDelete={(target, fingerprint) =>
+        workspace.delete(target, fingerprint)}
     />
     {#if workspace.view === 'board'}{#key active}<Board
           bind:this={board}
           snapshot={workspace.board}
+          runningTaskIds={new Set(
+            workspace.timers.sessions
+              .filter((s) => s.state === 'running')
+              .map((s) => s.task_id),
+          )}
           loading={workspace.boardLoading}
           readError={workspace.boardError}
           nowUtc={workspace.nowUtc}
@@ -494,11 +518,15 @@
         <h1>{heading}</h1>
         <p>
           {data?.runtime.seeded
-            ? 'Thursday, September 11, 2025 · 13:42 · Fixture preview'
+            ? new Intl.DateTimeFormat('en-US', {
+                timeZone: workspace.timeZone,
+                dateStyle: 'full',
+                timeStyle: 'medium',
+              }).format(new Date(workspace.nowUtc)) + ' · Live fixture'
             : 'Your local workspace'}
         </p>
       </div>
-      <span class="milestone">M1 · Projects & Board</span>
+      <span class="milestone">M2 · Timers & time entries</span>
     </section>
     <section class="placeholder">
       <div class="placeholder-symbol" data-color="cyan"><Circle /></div>
@@ -514,7 +542,7 @@
           ? 'Board, Week, and Notes are placeholders. Project and task workflows begin in M1.'
           : active === 'today'
             ? 'The Today digest arrives in M4.'
-            : 'The day planner arrives in M3. Timer workflows arrive in M2.'}
+            : 'The day planner arrives in M3. Open a task to start a timer or log time.'}
       </p>
       <button class="outline" onclick={() => navigate('settings')}
         >Open Settings <ArrowRight /></button
@@ -556,6 +584,7 @@
   <TaskDetailDialog
     bind:this={detailDialog}
     detail={workspace.detail}
+    time={workspace.timeBindings(workspace.detail.task.id)}
     tags={workspace.board?.tags ?? workspace.detail.tags}
     timeZone={workspace.timeZone}
     stagedAttachments={workspace.staged}
@@ -860,7 +889,9 @@
   .toggle.on span {
     background: var(--on-accent);
     transform: translateX(
-      calc(var(--toggle-width) - var(--toggle-knob) - 2 * var(--toggle-inset))
+      calc(
+        var(--toggle-width) - var(--toggle-knob) - 2 * var(--toggle-inset)
+      )
     );
   }
   .tray-tip {

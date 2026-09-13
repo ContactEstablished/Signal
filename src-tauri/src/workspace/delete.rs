@@ -28,6 +28,8 @@ pub async fn graph(conn: &mut SqliteConnection, target: &DeletionTarget) -> Resu
     let ids: Vec<Value> = tasks.iter().map(|v| v["id"].clone()).collect();
     let mut result = json!({"root":root,"tasks":tasks});
     for name in [
+        "timer_sessions",
+        "timer_requests",
         "subtasks",
         "task_tags",
         "attachments",
@@ -39,7 +41,9 @@ pub async fn graph(conn: &mut SqliteConnection, target: &DeletionTarget) -> Resu
             conn,
             &format!(
                 "SELECT * FROM {name} ORDER BY {}",
-                if name == "task_tags" {
+                if name == "timer_requests" {
+                    "request_id"
+                } else if name == "task_tags" {
                     "task_id,tag_id"
                 } else {
                     "id"
@@ -113,12 +117,18 @@ fn fingerprint(graph: &Value) -> String {
 pub async fn preview(pool: &SqlitePool, target: &DeletionTarget) -> Result<Value> {
     let mut tx = pool.begin().await?;
     let data = graph(&mut tx, target).await?;
-    let counts: serde_json::Map<String, Value> = data
+    let mut counts: serde_json::Map<String, Value> = data
         .as_object()
         .unwrap()
         .iter()
         .filter_map(|(k, v)| v.as_array().map(|a| (k.clone(), json!(a.len()))))
         .collect();
+    counts.remove("timer_requests");
+    let sessions = data["timer_sessions"].as_array().unwrap();
+    counts.insert(
+        "timer_sessions".into(),
+        json!(sessions.iter().filter(|v| v["state"] != "stopped").count()),
+    );
     tx.commit().await?;
     Ok(json!({"counts":counts,"fingerprint":fingerprint(&data)}))
 }
@@ -148,6 +158,22 @@ pub async fn remove(
         execute(
             &mut tx,
             "UPDATE time_entries SET block_id=NULL WHERE id=?",
+            vec![v["id"].clone()],
+        )
+        .await?;
+    }
+    for v in data["timer_requests"].as_array().unwrap() {
+        execute(
+            &mut tx,
+            "DELETE FROM timer_requests WHERE request_id=?",
+            vec![v["request_id"].clone()],
+        )
+        .await?;
+    }
+    for v in data["timer_sessions"].as_array().unwrap() {
+        execute(
+            &mut tx,
+            "DELETE FROM timer_sessions WHERE id=?",
             vec![v["id"].clone()],
         )
         .await?;

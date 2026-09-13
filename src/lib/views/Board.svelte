@@ -23,6 +23,7 @@
     snapshot,
     loading = false,
     readError = '',
+    runningTaskIds = new Set<string>(),
     nowUtc,
     timeZone,
     selectedDate,
@@ -35,6 +36,7 @@
     snapshot: BoardSnapshot | null;
     loading?: boolean;
     readError?: string;
+    runningTaskIds?: ReadonlySet<string>;
     nowUtc: string;
     timeZone: string;
     selectedDate: string;
@@ -54,7 +56,9 @@
     error = $state('');
   let container = $state<HTMLDivElement>(null!);
   let groups = $derived(
-    groupTasks(filterTasks(snapshot?.tasks ?? [], filters, nowUtc, timeZone)),
+    groupTasks(
+      filterTasks(snapshot?.tasks ?? [], filters, nowUtc, timeZone),
+    ),
   );
   let all = $derived(groupTasks(snapshot?.tasks ?? []));
   let drag = $state<{
@@ -102,7 +106,11 @@
   export function openFilters() {
     filtersOpen = true;
   }
-  async function move(id: string, status: TaskStatus, before: string | null) {
+  async function move(
+    id: string,
+    status: TaskStatus,
+    before: string | null,
+  ) {
     if (pending) return;
     pending = true;
     error = '';
@@ -152,7 +160,8 @@
       cards.find(
         (c) =>
           y <
-          c.getBoundingClientRect().top + c.getBoundingClientRect().height / 2,
+          c.getBoundingClientRect().top +
+            c.getBoundingClientRect().height / 2,
       )?.dataset.taskId ?? null;
   }
   function scroll() {
@@ -202,19 +211,22 @@
     cancel();
     if (current.active && current.status && task) {
       dropping = { task, status: current.status, before: current.before };
-      void move(current.id, current.status, current.before).then(async () => {
-        await tick();
-        if (!container?.isConnected) return;
-        const card = [
-          ...container.querySelectorAll<HTMLElement>('[data-task-id]'),
-        ].find((card) => card.dataset.taskId === current.id);
-        card
-          ?.querySelector<HTMLButtonElement>('.card-open')
-          ?.focus({ preventScroll: true });
-      });
+      void move(current.id, current.status, current.before).then(
+        async () => {
+          await tick();
+          if (!container?.isConnected) return;
+          const card = [
+            ...container.querySelectorAll<HTMLElement>('[data-task-id]'),
+          ].find((card) => card.dataset.taskId === current.id);
+          card
+            ?.querySelector<HTMLButtonElement>('.card-open')
+            ?.focus({ preventScroll: true });
+        },
+      );
     }
   }
   onDestroy(cancel);
+
 </script>
 
 <svelte:window
@@ -257,6 +269,7 @@
             : groups[status]}
           total={all[status].length}
           filtered={hasFilters(filters)}
+          {runningTaskIds}
           {nowUtc}
           {timeZone}
           {selectedTaskId}
@@ -282,16 +295,21 @@
           ?.focus();
       }}
     />{/if}
-{:else if loading}<p role="status">Loading Board…</p>{:else if !readError}<p>
+{:else if loading}<p role="status">Loading Board…</p>{:else if !readError}<p
+  >
     Select or create a project to open its Board.
   </p>{/if}
-<p class="drag-announcement" role="status" aria-live="polite">{announcement}</p>
+<p class="drag-announcement" role="status" aria-live="polite">
+  {announcement}
+</p>
 {#if pending}<p class="saving" role="status">Saving task order…</p>{/if}
 
 <style>
   .board-scroll {
     overflow: auto;
-    max-height: calc(100vh - var(--header-height) - var(--week-later-width));
+    max-height: calc(
+      100vh - var(--header-height) - var(--week-later-width)
+    );
     padding-bottom: var(--space-6);
   }
   .dragging,

@@ -14,8 +14,12 @@ const api = vi.hoisted(() => ({
   getBoard: vi.fn(),
   getTaskDetail: vi.fn(),
   open: vi.fn(),
+  stopTimer: vi.fn(),
+  deleteEntity: vi.fn(),
+  getTaskTime: vi.fn(),
 }));
 vi.mock('../../src/lib/native/commands', () => api);
+vi.mock('../../src/lib/native/timers', () => api);
 vi.mock('../../src/lib/db/client', () => ({ openFoundation: api.open }));
 const project: ProjectRecord = {
   id: 'p',
@@ -89,8 +93,100 @@ it('propagates rejected writes without publishing or calling refresh', async () 
   expect(w.detail).toBeNull();
 });
 
-it('retains authoritative project order when the following refresh fails',async()=>{
- const w=new Workspace();const second={...project,id:'second',name:'Second',sort_order:1};w.projects=[project,second];
- api.moveProject.mockResolvedValue([{...second,sort_order:0},{...project,sort_order:1}]);
- await w.moveProject('second','left');expect(w.projects.map(p=>p.id)).toEqual(['second','p']);expect(w.notice).toContain('Saved; refresh failed');
+it('retains authoritative project order when the following refresh fails', async () => {
+  const w = new Workspace();
+  const second = {
+    ...project,
+    id: 'second',
+    name: 'Second',
+    sort_order: 1,
+  };
+  w.projects = [project, second];
+  api.moveProject.mockResolvedValue([
+    { ...second, sort_order: 0 },
+    { ...project, sort_order: 1 },
+  ]);
+  await w.moveProject('second', 'left');
+  expect(w.projects.map((p) => p.id)).toEqual(['second', 'p']);
+  expect(w.notice).toContain('Saved; refresh failed');
+});
+
+it('publishes Stop accounting before failed refresh and supplies its revision to a queued edit', async () => {
+  const w = new Workspace();
+  w.editor = { kind: 'detail', taskId: 'task' };
+  w.timers.sessions = [
+    {
+      id: 's',
+      task_id: 'task',
+      block_id: null,
+      state: 'running',
+      started_at: '2025-09-11T00:00:00Z',
+      segment_started_at: '2025-09-11T00:00:00Z',
+      accumulated_ms: 0,
+      ended_at: null,
+      revision: 0,
+      entry_id: null,
+    },
+  ];
+  api.stopTimer.mockResolvedValue({
+    snapshot: {
+      sessions: [],
+      now_utc: '2025-09-11T01:00:00Z',
+      offset_ms: 0,
+    },
+    detail: { ...reply(1), task: { ...reply(1).task, hours_worked: 1 } },
+    entries: [
+      {
+        id: 'entry',
+        task_id: 'task',
+        block_id: null,
+        started_at: '2025-09-11T00:00:00Z',
+        ended_at: '2025-09-11T01:00:00Z',
+        minutes: 60,
+      },
+    ],
+    outcome: { session_id: 's', entry_id: 'entry' },
+  });
+  api.updateTask.mockResolvedValue(reply(2));
+  await Promise.all([
+    w.timeAction('task', 'stop'),
+    w.patch('task', { title: 'After Stop' }),
+  ]);
+  expect(api.stopTimer).toHaveBeenCalledTimes(1);
+  expect(api.updateTask.mock.calls[0][2]).toBe(1);
+  expect(w.timers.entries.task[0].minutes).toBe(60);
+  expect(w.timers.running).toBe(0);
+  expect(w.notice).toContain('Saved; refresh failed');
+});
+
+it('clears all deleted project timers before a failed refresh while retaining unrelated sessions', async () => {
+  const w = new Workspace();
+  const session = {
+    id: 's',
+    task_id: 'task',
+    block_id: null,
+    state: 'running' as const,
+    started_at: '2025-09-11T00:00:00Z',
+    segment_started_at: '2025-09-11T00:00:00Z',
+    accumulated_ms: 0,
+    ended_at: null,
+    revision: 0,
+    entry_id: null,
+  };
+  w.timers.sessions = [
+    session,
+    { ...session, id: 'other', task_id: 'other' },
+  ];
+  w.timers.entries.task = [];
+  api.getBoard.mockResolvedValue({
+    project,
+    tasks: [task],
+    meetings: [],
+    tags: [],
+  });
+  api.deleteEntity.mockResolvedValue({ cleanupPending: false });
+  await w.delete({ kind: 'project', id: 'p' }, 'fingerprint');
+  expect(w.timers.sessions.map((s) => s.task_id)).toEqual(['other']);
+  expect(w.timers.entries.task).toBeUndefined();
+  expect(w.notice).toContain('Saved; refresh failed');
 });

@@ -43,6 +43,7 @@ impl From<std::io::Error> for AppError {
 pub fn uid() -> String {
     uuid::Uuid::new_v4().to_string()
 }
+#[cfg(test)]
 pub fn now(seeded: bool) -> String {
     if seeded {
         "2025-09-11T17:42:00.000Z".into()

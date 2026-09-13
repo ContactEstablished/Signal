@@ -50,7 +50,10 @@
     pending = true;
     error = '';
     try {
-      preview = await onPreviewDeletion({ kind: 'project', id: project.id });
+      preview = await onPreviewDeletion({
+        kind: 'project',
+        id: project.id,
+      });
       open = false;
       dialog.showModal();
     } catch (e) {
@@ -64,7 +67,10 @@
     pending = true;
     error = '';
     try {
-      await onDelete({ kind: 'project', id: project.id }, preview.fingerprint);
+      await onDelete(
+        { kind: 'project', id: project.id },
+        preview.fingerprint,
+      );
       dialog.close();
     } catch (e) {
       error = errorMessage(e);
@@ -88,8 +94,9 @@
           open = false;
           onEdit();
         }}>Edit project</button
-      ><button disabled={pending || index === 0} onclick={() => move('left')}
-        >Move left</button
+      ><button
+        disabled={pending || index === 0}
+        onclick={() => move('left')}>Move left</button
       ><button
         disabled={pending || index === total - 1}
         onclick={() => move('right')}>Move right</button
@@ -117,9 +124,13 @@
     >
   </div>
   <p>
-    This permanently deletes the project and its related records. There is no
-    undo. Original attachment source files are kept.
+    This permanently deletes the project and its related records. There is
+    no undo. Original attachment source files are kept.
   </p>
+  {#if preview?.counts.timer_sessions}<p class="warning">
+      Running and paused timers will be discarded. Their unlogged time will
+      be lost.
+    </p>{/if}
   {#if preview}<ul>
       {#each Object.entries(preview.counts).filter(([, n]) => n > 0) as [kind, count]}<li
         >
@@ -128,12 +139,15 @@
         </li>{/each}
     </ul>{/if}{#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="dialog-footer">
-    <button class="outline" disabled={pending} onclick={() => dialog.close()}
-      >Cancel</button
+    <button
+      class="outline"
+      disabled={pending}
+      onclick={() => dialog.close()}>Cancel</button
     ><span class="spacer"></span>{#if preview}<button
         class="outline danger"
         disabled={pending}
-        onclick={remove}>{pending ? 'Deleting…' : 'Delete permanently'}</button
+        onclick={remove}
+        >{pending ? 'Deleting…' : 'Delete permanently'}</button
       >{:else}<button class="outline" disabled={pending} onclick={ask}
         >Refresh affected records</button
       >{/if}

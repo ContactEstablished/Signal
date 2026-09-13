@@ -10,8 +10,8 @@ async fn pool(app: &AppHandle) -> Result<sqlx::SqlitePool> {
         .await
         .map_err(|e| AppError::new("Database", e))
 }
-fn clock(app: &AppHandle) -> String {
-    now(app.state::<crate::db::RuntimeState>().seeded)
+fn clock(app: &AppHandle) -> Result<String> {
+    Ok(crate::clock::sample(app)?.0)
 }
 #[tauri::command]
 pub async fn list_projects(app: AppHandle) -> Result<Value> {
@@ -54,7 +54,7 @@ pub async fn move_project(app: AppHandle, id: String, direction: String) -> Resu
 pub async fn create_task(app: AppHandle, input: Value) -> Result<Value> {
     let files = app.state::<crate::attachments::Files>();
     let _gate = files.gate.lock().await;
-    tasks::create(&pool(&app).await?, input, &clock(&app)).await
+    tasks::create(&pool(&app).await?, input, &clock(&app)?).await
 }
 #[tauri::command]
 pub async fn update_task(
@@ -68,7 +68,7 @@ pub async fn update_task(
         &id,
         patch,
         expected_revision,
-        &clock(&app),
+        &clock(&app)?,
     )
     .await
 }
@@ -86,7 +86,7 @@ pub async fn move_task(
         &status,
         before_task_id.as_deref(),
         expected_revision,
-        &clock(&app),
+        &clock(&app)?,
     )
     .await
 }
@@ -103,7 +103,7 @@ pub async fn set_subtasks(
         "subtasks",
         inputs,
         expected_revision,
-        &clock(&app),
+        &clock(&app)?,
     )
     .await
 }
@@ -120,7 +120,7 @@ pub async fn set_task_tags(
         "tags",
         inputs,
         expected_revision,
-        &clock(&app),
+        &clock(&app)?,
     )
     .await
 }
@@ -137,7 +137,7 @@ pub async fn set_task_alerts(
         "alerts",
         offsets,
         expected_revision,
-        &clock(&app),
+        &clock(&app)?,
     )
     .await
 }
@@ -154,9 +154,13 @@ pub async fn delete_entity(
     let pool = pool(&app).await?;
     let files = app.state::<crate::attachments::Files>();
     let _gate = files.gate.lock().await;
-    delete::remove(&pool, &target, &fingerprint, &clock(&app)).await?;
+    let now = clock(&app)?;
+    delete::remove(&pool, &target, &fingerprint, &now).await?;
+    if let Err(e) = crate::tray::refresh(&app).await {
+        eprintln!("Timer tooltip: {}", e.message);
+    }
     Ok(
-        serde_json::json!({"deleted":true,"cleanupPending":files.cleanup(&pool,&clock(&app)).await.unwrap_or(true)}),
+        serde_json::json!({"deleted":true,"cleanupPending":files.cleanup(&pool,&now).await.unwrap_or(true)}),
     )
 }
 #[cfg(test)]

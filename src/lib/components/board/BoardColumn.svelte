@@ -12,6 +12,7 @@
     tasks,
     total,
     filtered,
+    runningTaskIds = new Set<string>(),
     nowUtc,
     timeZone,
     selectedTaskId,
@@ -26,6 +27,7 @@
     tasks: BoardTask[];
     total: number;
     filtered: boolean;
+    runningTaskIds?: ReadonlySet<string>;
     nowUtc: string;
     timeZone: string;
     selectedTaskId: string | null;
@@ -44,7 +46,9 @@
     const rows: { task: BoardTask; phase: 'drag' | 'drop' | null }[] =
       tasks.map((task) => ({ task, phase: null }));
     if (preview) {
-      const before = rows.findIndex((row) => row.task.id === preview.before);
+      const before = rows.findIndex(
+        (row) => row.task.id === preview.before,
+      );
       rows.splice(before < 0 ? rows.length : before, 0, {
         task: { ...preview.task, status },
         phase: preview.phase,
@@ -63,6 +67,7 @@
     {#each cards as row (row.phase ? `preview:${row.task.id}` : row.task.id)}
       <TaskCard
         task={row.task}
+        running={runningTaskIds.has(row.task.id)}
         {nowUtc}
         {timeZone}
         selected={!row.phase && selectedTaskId === row.task.id}

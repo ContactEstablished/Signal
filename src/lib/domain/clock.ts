@@ -1,14 +1,14 @@
 import { Temporal } from '@js-temporal/polyfill';
 export const fixtureInstant = '2025-09-11T17:42:00.000Z';
 export const fixtureZone = 'America/New_York';
-export function makeClock(
-  seeded: boolean,
-  read: () => Date = () => new Date(),
-  zone = Intl.DateTimeFormat().resolvedOptions().timeZone,
-) {
+export function makeClock({
+  offsetMs = 0,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+  read = () => new Date(),
+}: { offsetMs?: number; timeZone?: string; read?: () => Date } = {}) {
   return {
-    timeZone: seeded ? fixtureZone : zone,
-    nowUtc: () => (seeded ? fixtureInstant : read().toISOString()),
+    timeZone,
+    nowUtc: () => new Date(read().getTime() + offsetMs).toISOString(),
   };
 }
 export function dateAt(instant: string, zone: string) {

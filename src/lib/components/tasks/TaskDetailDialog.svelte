@@ -7,7 +7,9 @@
   import SubtaskList from './SubtaskList.svelte';
   import TaskNotes from './TaskNotes.svelte';
   import TaskTags from './TaskTags.svelte';
-  import TaskTimeCard from './TaskTimeCard.svelte';
+  import TaskTimeCard, {
+    type TimerUiBindings,
+  } from './TaskTimeCard.svelte';
   import AttachmentList from './AttachmentList.svelte';
   import { applyPastedLink } from '../../domain/links';
   import {
@@ -44,6 +46,7 @@
     onDeleteEntity,
     onDeleted,
     onClose,
+    time,
   }: {
     detail: TaskDetail;
     tags: Tag[];
@@ -67,6 +70,7 @@
     ) => Promise<CleanupResult>;
     onDeleted: () => void;
     onClose: () => void;
+    time?: TimerUiBindings;
   } = $props();
   const keys = [
     'title',
@@ -110,6 +114,31 @@
     deleted = $state(false);
   let dialog: HTMLDialogElement;
   let fields: TaskFields;
+  let timeCard: TaskTimeCard;
+  let logDirty = $state(false);
+  function trackTime(action: () => Promise<void>): Promise<void> {
+    pending++;
+    const result = action().finally(() => {
+      pending--;
+      operations.delete(result);
+    });
+    operations.add(result);
+    return result;
+  }
+  const trackedTime = $derived(
+    time
+      ? {
+          ...time,
+          onStart: () => trackTime(time!.onStart),
+          onPause: () => trackTime(time!.onPause),
+          onResume: () => trackTime(time!.onResume),
+          onStop: () => trackTime(time!.onStop),
+          onRetry: () => trackTime(time!.onRetry),
+          onLog: (input: { startedAt: string; durationMs: number }) =>
+            trackTime(() => time!.onLog(input)),
+        }
+      : undefined,
+  );
   let closePromise: Promise<boolean> | null = null,
     resolveClose: ((v: boolean) => void) | null = null;
   const operations = new Set<Promise<unknown>>();
@@ -200,6 +229,7 @@
   }
   function dirty() {
     return (
+      logDirty ||
       subtaskDraft ||
       tagDraft ||
       invalid ||
@@ -261,9 +291,16 @@
       notice =
         'Attachment removed. File cleanup will retry when it becomes available.';
   }
-  export async function requestClose(_reason: CloseReason): Promise<boolean> {
+  export async function requestClose(
+    _reason: CloseReason,
+  ): Promise<boolean> {
     await Promise.allSettled([...operations]);
     if (deleted) return true;
+    if (time?.recoveryRequired) {
+      notice =
+        'Retry the pending time operation before closing; its saved result is unknown.';
+      return false;
+    }
     deleteMode = false;
     deletion = null;
     if (closePromise) return closePromise;
@@ -289,6 +326,15 @@
       return;
     }
     error = '';
+    if (time?.recoveryRequired) {
+      finishClose(false);
+      notice = 'Retry the pending time operation before closing.';
+      return;
+    }
+    if (choice === 'save' && logDirty && !(await timeCard.saveLog())) {
+      finishClose(false);
+      return;
+    }
     if (choice === 'discard') {
       const result = await run(() =>
         onDiscardStaged(stagedAttachments.map((f) => f.token)),
@@ -430,7 +476,8 @@
         class="title"
         value={buffer.title ?? ''}
         disabled={!!pending || confirm || deleteMode}
-        oninput={(e) => (buffer = { ...buffer, title: e.currentTarget.value })}
+        oninput={(e) =>
+          (buffer = { ...buffer, title: e.currentTarget.value })}
         onblur={() => void commit(['title'])}
         onkeydown={(e) => {
           fieldEscape(e, 'title');
@@ -513,12 +560,16 @@
       </p>{/if}
     {#if confirm}<section class="confirm-panel">
         <h3>Unsaved task changes</h3>
-        <p>Save your pending edits or discard them before closing.</p>
+        <p>
+          Save your pending edits{logDirty ? ' and time log' : ''} or discard
+          them before closing.
+        </p>
         <div class="actions">
           <button
             class="primary"
             disabled={!!pending}
-            onclick={() => closeChoice('save')}>Save changes</button
+            onclick={() => closeChoice('save')}
+            >Save changes{logDirty ? ' and log' : ''}</button
           ><button
             class="outline danger"
             disabled={!!pending}
@@ -533,6 +584,10 @@
     {#if deleteMode}<section class="confirm-panel">
         <h3>Delete this task permanently?</h3>
         <p>There is no undo. Original attachment files are kept.</p>
+        {#if deletion?.counts.timer_sessions}<p class="warning">
+            Running and paused timers will be discarded. Their unlogged time
+            will be lost.
+          </p>{/if}
         {#if deletion}<ul>
             {#each Object.entries(deletion.counts).filter(([, n]) => n > 0) as [name, n]}<li
               >
@@ -593,6 +648,11 @@
             }).format(new Date(detail.task.blocked_since))
           : 'unknown'}
       </p>{/if}<TaskTimeCard
+      bind:this={timeCard}
+      time={trackedTime}
+      taskName={detail.task.title}
+      onLogDirty={(value) => (logDirty = value)}
+      disabled={!!pending || confirm || deleteMode}
       hours={detail.task.hours_worked}
       estimate={detail.task.estimate_h}
       onPreview={(s) => (notice = s)}

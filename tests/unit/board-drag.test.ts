@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, it, expect, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
-import { SvelteMap } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import Board from '../../src/lib/views/Board.svelte';
 import { newTaskDraft } from '../../src/lib/domain/task-draft';
 import type {
@@ -65,6 +65,7 @@ function pointer(
   flushSync();
 }
 function setup() {
+  const running = new SvelteSet<string>();
   const task = (id: string, status: TaskStatus): BoardTask => ({
     ...newTaskDraft('p'),
     id,
@@ -124,6 +125,7 @@ function setup() {
       get snapshot() {
         return state.get('snapshot')!;
       },
+      runningTaskIds: running,
       nowUtc: '2025-09-11T17:42:00.000Z',
       timeZone: 'America/New_York',
       selectedDate: '2025-09-11',
@@ -142,7 +144,7 @@ function setup() {
   const b = lane.querySelector<HTMLElement>('[data-task-id="B"]')!;
   b.getBoundingClientRect = () => rect(300);
   hit.mockReturnValue(b);
-  return { source, grip, lane, b, move, resolve, reject };
+  return { source, grip, lane, b, move, resolve, reject, running };
 }
 it('shows the actual card as an inert preview, holds its slot, and becomes solid on drop before save completes', async () => {
   const { source, grip, lane, move, resolve } = setup();
@@ -230,4 +232,20 @@ it('allows navigation during a pending move without focusing a destroyed Board',
   await move.mock.results[0].value;
   await Promise.resolve();
   expect(document.querySelector('[data-drop-preview]')).toBeNull();
+});
+
+it('updates running icons from shared timer state without changing logged totals', () => {
+  const { source, b, running } = setup();
+  expect(source.querySelector('.running-indicator')).toBeNull();
+  running.add('B');
+  flushSync();
+  expect(b.querySelector('.running-indicator')).not.toBeNull();
+  expect(b.querySelector('.card-open')?.getAttribute('aria-label')).toBe(
+    'Open B, timer running',
+  );
+  expect(source.querySelector('.running-indicator')).toBeNull();
+  expect(b.textContent).toContain('2/4h');
+  running.delete('B');
+  flushSync();
+  expect(b.querySelector('.running-indicator')).toBeNull();
 });

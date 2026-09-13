@@ -1,3 +1,6 @@
+import { TimerState } from './timers.svelte';
+import type { TimerAction } from '../domain/timers';
+import type { TimerUiBindings } from '../components/tasks/TaskTimeCard.svelte';
 import { openFoundation, type Foundation } from '../db/client';
 import * as commands from '../native/commands';
 import { makeClock, dateAt, dayBounds } from '../domain/clock';
@@ -42,13 +45,22 @@ export class Workspace {
   private detailQuery = latestQuery();
   private refreshQuery = latestQuery();
   private revisions = new Map<string, number>();
-  private clock = makeClock(false);
+  timers = new TimerState();
+  private clock = makeClock();
+  private timeBusy = new Set<string>();
   async load() {
     this.loading = true;
     this.error = '';
     try {
       this.foundation = await openFoundation();
-      this.clock = makeClock(this.foundation.runtime.seeded);
+      this.clock = makeClock({
+        offsetMs: this.foundation.timerSnapshot.offset_ms,
+        timeZone: this.foundation.runtime.seeded
+          ? 'America/New_York'
+          : Intl.DateTimeFormat().resolvedOptions().timeZone,
+      });
+      this.timers.publish(this.foundation.timerSnapshot);
+      this.notice = this.foundation.timerSnapshot.warnings?.join(' ') ?? '';
       this.tick();
       if (this.foundation.runtime.seeded && import.meta.env.DEV) {
         const fixtures = await import('../seed-attachments');
@@ -94,13 +106,15 @@ export class Workspace {
           this.revisions.set(task.id, task.revision);
       }
     } catch (e) {
-      if (this.boardQuery.current(ticket)) this.boardError = errorMessage(e);
+      if (this.boardQuery.current(ticket))
+        this.boardError = errorMessage(e);
     } finally {
       if (this.boardQuery.current(ticket)) this.boardLoading = false;
     }
   }
   async loadDetail(id: string) {
     const ticket = this.detailQuery.next();
+    void this.timers.load(id);
     const reply = await commands.getTaskDetail(id);
     if (this.detailQuery.current(ticket)) {
       this.detail = reply;
@@ -110,10 +124,20 @@ export class Workspace {
   }
   async refresh() {
     const ticket = this.refreshQuery.next();
+    const epoch = this.timers.version();
     const foundation = await openFoundation();
     const projects = await commands.listProjects();
     if (!this.refreshQuery.current(ticket)) return;
     this.foundation = foundation;
+    if (foundation.timerSnapshot) {
+      this.timers.accept(foundation.timerSnapshot, epoch);
+      this.clock = makeClock({
+        offsetMs: foundation.timerSnapshot.offset_ms,
+        timeZone: foundation.runtime.seeded
+          ? 'America/New_York'
+          : Intl.DateTimeFormat().resolvedOptions().timeZone,
+      });
+    }
     this.projects = projects;
     await this.loadBoard();
     if (
@@ -125,7 +149,10 @@ export class Workspace {
   }
   private publish(reply: unknown) {
     if (!reply || typeof reply !== 'object') return;
-    if (Array.isArray(reply)) { this.projects = reply as ProjectRecord[]; return; }
+    if (Array.isArray(reply)) {
+      this.projects = reply as ProjectRecord[];
+      return;
+    }
     if ('task' in reply) {
       const detail = reply as TaskDetail;
       this.revisions.set(detail.task.id, detail.task.revision);
@@ -143,7 +170,10 @@ export class Workspace {
         };
         this.board = {
           ...this.board,
-          tasks: [...this.board.tasks.filter((t) => t.id !== task.id), task],
+          tasks: [
+            ...this.board.tasks.filter((t) => t.id !== task.id),
+            task,
+          ],
         };
       }
     } else if ('id' in reply && 'color' in reply) {
@@ -151,7 +181,9 @@ export class Workspace {
       this.projects = [
         ...this.projects.filter((p) => p.id !== project.id),
         project,
-      ].sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id));
+      ].sort(
+        (a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id),
+      );
     }
   }
 
@@ -175,6 +207,9 @@ export class Workspace {
         }
         throw e;
       }
+      this.boardQuery.invalidate();
+      this.detailQuery.invalidate();
+      this.refreshQuery.invalidate();
       this.publish(result);
       try {
         await this.refresh();
@@ -185,6 +220,7 @@ export class Workspace {
     });
   }
   private revision(id: string) {
+    this.timers.assertWritable(id);
     const revision = this.revisions.get(id);
     if (revision === undefined)
       throw new Error('Reload this task before editing.');
@@ -209,7 +245,9 @@ export class Workspace {
     });
   }
   patch(id: string, patch: TaskPatch) {
-    return this.mutate(() => commands.updateTask(id, patch, this.revision(id)));
+    return this.mutate(() =>
+      commands.updateTask(id, patch, this.revision(id)),
+    );
   }
   moveTask(id: string, status: TaskStatus, before: string | null) {
     return this.mutate(() =>
@@ -275,7 +313,16 @@ export class Workspace {
     return this.mutate(async () => {
       const order = this.projects.map((p) => p.id),
         at = order.indexOf(target.id);
+      const bounds = dayBounds(this.selectedDate, this.timeZone);
+      const taskIds =
+        target.kind === 'task'
+          ? [target.id]
+          : (
+              await commands.getBoard(target.id, bounds.start, bounds.end)
+            ).tasks.map((t) => t.id);
+      for (const id of taskIds) this.timers.assertWritable(id);
       const result = await commands.deleteEntity(target, fingerprint);
+      for (const id of taskIds) this.timers.clear(id);
       if (target.kind === 'project')
         this.projects = this.projects.filter((p) => p.id !== target.id);
       if (target.kind === 'task' && this.board)
@@ -299,6 +346,51 @@ export class Workspace {
         this.notice = 'Deleted. Attachment cleanup remains queued.';
       return result;
     });
+  }
+  async timeAction(
+    id: string,
+    action: TimerAction,
+    log?: { startedAt: string; durationMs: number },
+    retry = false,
+  ) {
+    if (this.timeBusy.has(id))
+      throw new Error('A time action is already pending for this task.');
+    this.timeBusy.add(id);
+    try {
+      await this.mutate(async () => {
+        const result = await this.timers.execute(id, action, log, retry);
+        this.boardQuery.invalidate();
+        this.detailQuery.invalidate();
+        this.refreshQuery.invalidate();
+        this.publish(result.detail);
+        return result.detail;
+      });
+    } finally {
+      this.timeBusy.delete(id);
+    }
+  }
+  timeBindings(id: string): TimerUiBindings {
+    return {
+      session: this.timers.session(id),
+      entries: this.timers.entries[id] ?? [],
+      nowUtc: this.nowUtc,
+      timeZone: this.timeZone,
+      loading: !!this.timers.loading[id],
+      error: this.timers.errors[id] ?? '',
+      pending: !!this.timers.pending[id],
+      recoveryRequired: !!this.timers.recovery[id],
+      logCompletionVersion: this.timers.completions[id] ?? 0,
+      onStart: () => this.timeAction(id, 'start'),
+      onPause: () => this.timeAction(id, 'pause'),
+      onResume: () => this.timeAction(id, 'resume'),
+      onStop: () => this.timeAction(id, 'stop'),
+      onLog: (input) => this.timeAction(id, 'log', input),
+      onRetry: async () => {
+        const action = this.timers.retryAction(id);
+        if (action) await this.timeAction(id, action, undefined, true);
+        else await this.timers.load(id);
+      },
+    };
   }
   settled() {
     return this.queue.settled();
