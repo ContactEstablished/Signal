@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Signal", "version": "0.1.0", "identifier": "dev.contactestablished.signal",
+  "productName": "Signal", "version": "0.1.1", "identifier": "dev.contactestablished.signal",
   "build": { "beforeDevCommand": "pnpm dev", "devUrl": "http://127.0.0.1:1420", "beforeBuildCommand": "pnpm build", "frontendDist": "../dist" },
   "app": {
     "windows": [{ "label": "main", "title": "Signal", "width": 1600, "height": 960, "minWidth": 1200, "minHeight": 760, "decorations": true, "theme": "Dark", "visible": false }],

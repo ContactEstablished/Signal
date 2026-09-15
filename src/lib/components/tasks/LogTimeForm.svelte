@@ -1,6 +1,7 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
+  import TimeInput from '../TimeInput.svelte';
   import { onMount, onDestroy, untrack } from 'svelte';
   import { defaultTimeLog, normalizeTimeLog } from '../../domain/time-log';
   import { deadlineChoices } from '../../domain/deadlines';
@@ -24,7 +25,7 @@
     submitted = $state(false),
     submissionVersion = 0,
     alive = true;
-  let start: HTMLInputElement;
+  let start = $state<HTMLInputElement>();
   const dirty = $derived(JSON.stringify(draft) !== JSON.stringify(initial));
   const choices = $derived.by(() => {
     try {
@@ -48,7 +49,7 @@
       onClose();
     }
   });
-  onMount(() => start.focus());
+  onMount(() => start?.focus());
   onDestroy(() => {
     alive = false;
     onDirty(false);
@@ -100,11 +101,11 @@
       /></label
     >
     <label class="field"
-      ><span>Start time</span><input
-        bind:this={start}
-        aria-label="Log start time"
-        type="time"
-        bind:value={draft.startTime}
+      ><span>Start time</span><TimeInput
+        bind:element={start}
+        label="Log start time"
+        value={draft.startTime}
+        oninput={(v) => { draft.startTime = v; draft.offset = ''; }}
         onchange={() => (draft.offset = '')}
       /></label
     >
@@ -143,6 +144,7 @@
       Ends {new Intl.DateTimeFormat('en-US', {
         timeZone: time.timeZone,
         dateStyle: 'medium',
+        hour12: true,
         timeStyle: 'medium',
       }).format(new Date(preview))}
     </p>{/if}

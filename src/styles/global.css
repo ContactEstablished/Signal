@@ -251,3 +251,75 @@ select:focus-visible {
     animation: none;
   }
 }
+
+/* Shared agenda editor geometry uses the accepted meeting tokens. */
+.agenda-dialog {
+  overscroll-behavior: contain;
+  width: var(--modal-meeting-new);
+  max-width: calc(100vw - var(--space-8));
+  max-height: calc(100vh - var(--space-8));
+  overflow: auto;
+  padding: var(--padding-modal);
+  background: var(--bg-raised);
+  color: var(--text);
+  border: var(--line) solid var(--border-today);
+  border-radius: var(--radius-modal);
+  box-shadow: var(--shadow-modal);
+}
+.agenda-dialog::backdrop {
+  background: var(--scrim);
+}
+.agenda-dialog fieldset {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  min-width: 0;
+}
+.agenda-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-weight: var(--weight-medium);
+  margin-bottom: 0;
+}
+.agenda-dialog input,
+.agenda-dialog select,
+.agenda-dialog textarea {
+  width: 100%;
+  min-width: 0;
+}
+.agenda-dialog .dialog-x {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  padding: var(--space-1);
+  display: flex;
+}
+.agenda-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.agenda-actions button,
+.agenda-dialog button.outline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.agenda-recovery {
+  position: fixed;
+  bottom: var(--space-4);
+  left: var(--space-4);
+  right: var(--space-4);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: var(--line) solid var(--warn-border);
+  border-radius: var(--radius-card);
+}

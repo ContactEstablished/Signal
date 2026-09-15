@@ -32,7 +32,7 @@
     timeZone: string;
     selectedTaskId: string | null;
     pending: boolean;
-    onOpen: (id: string) => void;
+    onOpen: (id: string, event: MouseEvent) => void;
     onMove: (id: string, status: TaskStatus) => void;
     onDrag: (e: PointerEvent, id: string) => void;
     preview?: {
@@ -74,7 +74,7 @@
         {pending}
         preview={row.phase}
         dragSource={!row.phase && draggedTaskId === row.task.id}
-        onOpen={() => onOpen(row.task.id)}
+        onOpen={(event) => onOpen(row.task.id, event)}
         onStatus={(value) => onMove(row.task.id, value)}
         {onDrag}
       />

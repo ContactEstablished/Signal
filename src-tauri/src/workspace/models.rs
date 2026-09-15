@@ -182,7 +182,7 @@ pub async fn detail(conn: &mut SqliteConnection, id: &str) -> Result<Value> {
         vec![json!(id)],
     )
     .await?;
-    let meetings=rows(conn,"SELECT meetings.* FROM meetings JOIN meeting_tasks ON meetings.id=meeting_tasks.meeting_id WHERE task_id=? ORDER BY starts_at,meetings.id",vec![json!(id)]).await?;
+    let meetings: Vec<Value> = vec![]; // Calendar-linked meetings use the bounded agenda query.
     Ok(
         json!({"task":task,"project":project,"subtasks":subtasks,"tags":tags,"attachments":attachments,"alerts":alerts,"meetings":meetings}),
     )

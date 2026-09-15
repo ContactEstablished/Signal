@@ -1,3 +1,4 @@
+mod agenda;
 mod attachments;
 mod clock;
 mod db;
@@ -38,6 +39,14 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            agenda::initialize_agenda,
+            agenda::get_today,
+            agenda::get_week,
+            agenda::get_meeting_detail,
+            agenda::get_task_meetings,
+            agenda::search_agenda_tasks,
+            agenda::preview_meeting_change,
+            agenda::apply_meeting,
             planner::get_planner,
             planner::apply_planner,
             timers::initialize_timers,

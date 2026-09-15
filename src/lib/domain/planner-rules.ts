@@ -1,16 +1,17 @@
 import { Temporal } from '@js-temporal/polyfill';
 import { dateAt, dayBounds } from './clock';
 import { deadlineChoices } from './deadlines';
+export { minuteLabel } from './time-display';
 import type { BlockDraft, PlannerBlock, PlannerSnapshot, PlannerTask, PlannerItem, PlannerMeeting, PlanPreview, BatchMode } from './planner';
 export const addDays = (date: string, days: number) => Temporal.PlainDate.from(date).add({ days }).toString();
 export function previousMonday(date: string) {
  const d = Temporal.PlainDate.from(date);
  return d.subtract({ days: d.dayOfWeek === 1 ? 7 : d.dayOfWeek-1 }).toString();
 }
-export function minuteLabel(min: number) { return `${String(Math.floor(min/60)).padStart(2,'0')}:${String(min%60).padStart(2,'0')}`; }
+function wallTime(min: number) { return `${String(Math.floor(min/60)).padStart(2,'0')}:${String(min%60).padStart(2,'0')}`; }
 export function endpointChoices(date: string, minute: number, zone: string) {
  if (!Number.isInteger(minute) || minute < 0 || minute > 1440) throw new Error('Time must be within this day.');
- return deadlineChoices(minute === 1440 ? addDays(date,1) : date, minuteLabel(minute === 1440 ? 0 : minute), zone);
+ return deadlineChoices(minute === 1440 ? addDays(date,1) : date, wallTime(minute === 1440 ? 0 : minute), zone);
 }
 export function normalizeBlock(draft: BlockDraft, date: string, zone: string): BlockDraft {
  if (![draft.start_min,draft.end_min].every(n=>Number.isInteger(n) && n%15===0) || draft.start_min<0 || draft.end_min>1440 || draft.end_min<=draft.start_min) throw new Error('Choose a range within one day in 15-minute steps.');

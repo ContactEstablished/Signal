@@ -307,7 +307,7 @@ it('protects an unsent Log draft before closing', async () => {
     document.querySelector<HTMLInputElement>(
       '[aria-label="Log start time"]',
     )?.value,
-  ).toBe('10:00');
+  ).toBe('10:00 AM');
 });
 
 it('blocks native Close and Quit while a time result is unknown and leaves Retry available', async () => {

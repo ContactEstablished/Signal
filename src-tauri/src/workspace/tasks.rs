@@ -106,7 +106,14 @@ pub async fn board(pool: &SqlitePool, project: &str, start: &str, end: &str) -> 
     for task in &mut tasks {
         task["tags"]=json!(rows(&mut tx,"SELECT tags.* FROM tags JOIN task_tags ON tag_id=tags.id WHERE task_id=? ORDER BY name,tags.id",vec![task["id"].clone()]).await?);
     }
-    let meetings=rows(&mut tx,"SELECT * FROM meetings WHERE project_id=? AND julianday(starts_at)<julianday(?) AND julianday(starts_at)+duration_min/1440.0>julianday(?) ORDER BY starts_at,id",vec![project["id"].clone(),json!(end),json!(start)]).await?;
+    let meetings = crate::agenda::occurrences(
+        &mut tx,
+        &start,
+        &end,
+        Some(project["id"].as_str().unwrap()),
+        false,
+    )
+    .await?;
     let tags = rows(&mut tx, "SELECT * FROM tags ORDER BY name,id", vec![]).await?;
     tx.commit().await?;
     Ok(json!({"project":project,"tasks":tasks,"tags":tags,"meetings":meetings}))

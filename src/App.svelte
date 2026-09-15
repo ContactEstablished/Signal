@@ -4,6 +4,22 @@
   import TimerStatus from './lib/components/shell/TimerStatus.svelte';
   import { onMount, tick } from 'svelte';
   import YourDay from './lib/views/YourDay.svelte';
+  import Today from './lib/views/Today.svelte';
+  import Week from './lib/views/Week.svelte';
+  import NewMeetingDialog from './lib/components/meetings/NewMeetingDialog.svelte';
+  import MeetingDetailDialog from './lib/components/meetings/MeetingDetailDialog.svelte';
+  import DueDateDialog from './lib/components/agenda/DueDateDialog.svelte';
+  import * as agendaApi from './lib/native/agenda';
+  import {
+    dueFields,
+    proposeTaskDate,
+    resolveTaskDate,
+  } from './lib/domain/agenda-calendar';
+  import type {
+    DueDraft,
+    DueDestination,
+    MeetingRef,
+  } from './lib/domain/agenda';
   import type { TaskDetail } from './lib/domain/types';
   import {
     Search,
@@ -42,10 +58,144 @@
   const heading = $derived(active === 'today' ? 'Today' : 'Your Day');
   let day = $state<YourDay>(null!);
   let createdTask: TaskDetail | null = null;
+  let newMeetingDialog = $state<NewMeetingDialog>(null!);
+  let meetingDialog = $state<MeetingDetailDialog>(null!);
+  let dueDialog = $state<DueDateDialog>(null!);
+  let due = $state<{
+    id: string;
+    title: string;
+    revision: number;
+    draft: DueDraft;
+    reason: string;
+  } | null>(null);
+  let dueResolve: ((v: 'committed' | 'cancelled') => void) | null = null;
+  function endDue(value: 'committed' | 'cancelled') {
+    due = null;
+    dueResolve?.(value);
+    dueResolve = null;
+  }
+  async function openMeeting(ref: MeetingRef) {
+    if (!(await closeEditor('navigation'))) return;
+    trigger = document.activeElement as HTMLElement;
+    await workspace.agenda.loadDetail(ref);
+    if (!workspace.agenda.detail) {
+      workspace.notice = workspace.agenda.detailError;
+      return;
+    }
+    if (
+      JSON.stringify(workspace.agenda.detail.occurrence.ref) !==
+      JSON.stringify(ref)
+    )
+      return;
+    workspace.editor = { kind: 'meeting', ref };
+  }
+  async function openNewMeeting() {
+    const p = selectedProject ?? workspace.projects[0];
+    if (!p) return;
+    if (!(await closeEditor('navigation'))) return;
+    trigger = document.activeElement as HTMLElement;
+    workspace.editor = { kind: 'new-meeting', projectId: p.id };
+  }
+  async function planAgendaTask(id: string) {
+    if (!(await closeEditor('navigation'))) return;
+    workspace.planner.followToday = true;
+    workspace.planner.date = workspace.selectedDate;
+    workspace.planner.scope = 'all';
+    await workspace.select('day');
+    await tick();
+    day?.planTask(id);
+  }
+  async function navigateWeek(date: string) {
+    if (!(await closeEditor('navigation'))) return;
+    workspace.agenda.weekDate = date;
+    workspace.agenda.followWeek = false;
+    await workspace.loadAgenda();
+  }
+  async function moveDue(
+    id: string,
+    destination: DueDestination,
+  ): Promise<'committed' | 'cancelled'> {
+    if (!(await closeEditor('navigation'))) return 'cancelled';
+    const detail = await commands.getTaskDetail(id);
+    const t = detail.task;
+    if (destination.kind !== 'picker') {
+      const proposal = proposeTaskDate(
+        t,
+        destination.kind === 'none' ? null : destination.date,
+        workspace.timeZone,
+      );
+      if (proposal.kind === 'ready') {
+        await workspace.agendaAction({
+          action: 'move_due',
+          payload: {
+            taskId: id,
+            dueAt: proposal.due_at,
+            expectedRevision: t.revision,
+          },
+        });
+        return 'committed';
+      }
+      due = {
+        id,
+        title: t.title,
+        revision: t.revision,
+        draft: { date: proposal.date, time: proposal.time },
+        reason: proposal.reason,
+      };
+    } else
+      due = {
+        id,
+        title: t.title,
+        revision: t.revision,
+        draft: t.due_at
+          ? dueFields(t.due_at, workspace.timeZone)
+          : { date: workspace.selectedDate, time: '17:00:00.000' },
+        reason: t.due_at ? 'later' : 'no-deadline',
+      };
+    return new Promise((resolve) => (dueResolve = resolve));
+  }
+  async function saveDue(draft: DueDraft) {
+    if (!due) return;
+    await workspace.agendaAction({
+      action: 'move_due',
+      payload: {
+        taskId: due.id,
+        dueAt: resolveTaskDate(draft, workspace.timeZone),
+        expectedRevision: due.revision,
+      },
+    });
+    endDue('committed');
+  }
+  async function retryAgenda() {
+    try {
+      const editor = currentEditor();
+      const r = await workspace.retryAgenda();
+      if (due) endDue('committed');
+      else if (r.detail && editor && 'acceptRetry' in editor) {
+        editor.acceptRetry(r);
+      } else if (r.detail) {
+        workspace.editor = { kind: 'meeting', ref: r.detail.occurrence.ref };
+      } else if (
+        workspace.editor?.kind === 'meeting' ||
+        workspace.editor?.kind === 'new-meeting'
+      )
+        workspace.editor = null;
+    } catch (e) {
+      workspace.notice = errorMessage(e);
+    }
+  }
   let board = $state<Board>(null!);
   $effect(() => {
-    const guarded = !!workspace.editor || workspace.planner.guarded || Object.values(workspace.timers.pending).some(Boolean) || Object.values(workspace.timers.recovery).some(Boolean);
-    void commands.setEditGuard(guarded).catch(e => workspace.notice = errorMessage(e));
+    const guarded =
+      !!due ||
+      workspace.agenda.guarded ||
+      !!workspace.editor ||
+      workspace.planner.guarded ||
+      Object.values(workspace.timers.pending).some(Boolean) ||
+      Object.values(workspace.timers.recovery).some(Boolean);
+    void commands
+      .setEditGuard(guarded)
+      .catch((e) => (workspace.notice = errorMessage(e)));
   });
   let projectDialog = $state<ProjectDialog>(null!);
   let newDialog = $state<NewTaskDialog>(null!);
@@ -71,6 +221,9 @@
     trigger: HTMLElement | null = null,
     afterProjectSave: string | null = null;
   function currentEditor() {
+    if (due) return dueDialog;
+    if (workspace.editor?.kind === 'new-meeting') return newMeetingDialog;
+    if (workspace.editor?.kind === 'meeting') return meetingDialog;
     return workspace.editor?.kind === 'project'
       ? projectDialog
       : workspace.editor?.kind === 'new'
@@ -90,13 +243,27 @@
         const editor = currentEditor();
         let proceed = editor ? await editor.requestClose(reason) : true;
         if (proceed && day) proceed = await day.requestClose(reason);
-        if (workspace.planner.recovery || Object.values(workspace.timers.recovery).some(Boolean)) proceed = false;
+        if (
+          workspace.agenda.recovery ||
+          workspace.planner.recovery ||
+          Object.values(workspace.timers.recovery).some(Boolean)
+        )
+          proceed = false;
         await workspace.settled();
+        if (
+          workspace.agenda.recovery ||
+          workspace.planner.recovery ||
+          Object.values(workspace.timers.recovery).some(Boolean)
+        )
+          proceed = false;
         if (pendingExitId)
           await commands.resolveExitRequest(pendingExitId, proceed);
         else if (proceed && workspace.editor)
-          await commands.setEditGuard(workspace.planner.guarded);
+          await commands.setEditGuard(
+            workspace.planner.guarded || workspace.agenda.guarded || !!due,
+          );
         if (proceed) {
+          if (due) endDue('cancelled');
           workspace.editor = null;
           workspace.detail = null;
           const focus = trigger;
@@ -141,7 +308,10 @@
     }
   }
   async function openNew() {
-    const project = selectedProject ?? workspace.projects.find(p => p.id === workspace.planner.scope) ?? workspace.projects[0];
+    const project =
+      selectedProject ??
+      workspace.projects.find((p) => p.id === workspace.planner.scope) ??
+      workspace.projects[0];
     if (!project) return;
     if (!(await closeEditor('navigation'))) return;
     try {
@@ -163,6 +333,10 @@
       await commands.setEditGuard(true);
       workspace.staged = [];
       workspace.editor = { kind: 'detail', taskId };
+      void workspace.agenda.loadLinked(taskId, {
+        date: workspace.selectedDate,
+        timeZone: workspace.timeZone,
+      });
     } catch (e) {
       workspace.notice = errorMessage(e);
     }
@@ -270,10 +444,7 @@
     modal.showModal();
   }
   function keyboard(event: KeyboardEvent) {
-    if (
-      (event.ctrlKey || event.metaKey) &&
-      event.key.toLowerCase() === 'k'
-    ) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault();
       if (!modal.open && !workspace.editor)
         stub(
@@ -366,8 +537,7 @@
           'Search or jump to…',
           'Command palette preview. Search results and actions arrive in M7.',
           true,
-        )}
-      ><Search /><span>Search or jump to…</span><kbd>Ctrl K</kbd></button
+        )}><Search /><span>Search or jump to…</span><kbd>Ctrl K</kbd></button
     >
     <button
       class="settings-button"
@@ -384,8 +554,7 @@
       onclick={() =>
         void workspace
           .refresh()
-          .catch((e) => (workspace.notice = errorMessage(e)))}
-      >Refresh</button
+          .catch((e) => (workspace.notice = errorMessage(e)))}>Refresh</button
     ><button
       aria-label="Dismiss message"
       onclick={() => (workspace.notice = '')}><X /></button
@@ -456,8 +625,8 @@
           <div>
             <h2>Notification settings preview</h2>
             <p>
-              Reminders, toast notifications, sounds, and timer actions
-              arrive in M6.
+              Reminders, toast notifications, sounds, and timer actions arrive
+              in M6.
             </p>
           </div>
         </div>
@@ -472,10 +641,34 @@
       {/if}
     </section>
   </main>
+{:else if active === 'today'}
+  <Today
+    snapshot={workspace.agenda.today}
+    nowUtc={workspace.nowUtc}
+    timeZone={workspace.timeZone}
+    loading={workspace.agenda.loading}
+    pending={workspace.agenda.pending || workspace.agenda.recovery}
+    error={workspace.agenda.error}
+    onRetry={() => workspace.loadAgenda()}
+    onOpenTask={openTask}
+    onOpenMeeting={openMeeting}
+    onPlanTask={planAgendaTask}
+    onJoin={commands.openExternalUrl}
+    onNewMeeting={openNewMeeting}
+    onOpenYourDay={() => navigate('day')}
+  />
 {:else if active === 'day'}
-  <YourDay bind:this={day} {workspace} onOpenTask={openTask} onNewTask={openNew} onJoin={commands.openExternalUrl} onSummary={() => stub('Daily summary', 'Summary generation arrives in M5.')} />
+  <YourDay
+    bind:this={day}
+    {workspace}
+    onOpenMeeting={openMeeting}
+    onOpenTask={openTask}
+    onNewTask={openNew}
+    onJoin={commands.openExternalUrl}
+    onSummary={() => stub('Daily summary', 'Summary generation arrives in M5.')}
+  />
 {:else if selectedProject}
-  <main class="page project-page">
+  <main class="page project-page" class:agenda-page={workspace.view === 'week'}>
     <ProjectSubBar
       project={selectedProject}
       projects={workspace.projects}
@@ -487,8 +680,7 @@
       onMove={(direction) =>
         workspace.moveProject(selectedProject.id, direction)}
       onPreviewDeletion={commands.previewDeletion}
-      onDelete={(target, fingerprint) =>
-        workspace.delete(target, fingerprint)}
+      onDelete={(target, fingerprint) => workspace.delete(target, fingerprint)}
     />
     {#if workspace.view === 'board'}{#key active}<Board
           bind:this={board}
@@ -510,15 +702,25 @@
           onOpenTask={(id) => void openTask(id)}
           onMoveTask={(id, status, before) =>
             workspace.moveTask(id, status, before)}
+          onOpenMeeting={openMeeting}
           onPreview={(message) => (workspace.notice = message)}
         />{/key}
+    {:else if workspace.view === 'week'}<Week
+        snapshot={workspace.agenda.week}
+        timeZone={workspace.timeZone}
+        pending={workspace.agenda.pending || workspace.agenda.recovery}
+        loading={workspace.agenda.loading}
+        error={workspace.agenda.error}
+        onRetry={() => workspace.loadAgenda()}
+        onOpenTask={openTask}
+        onOpenMeeting={openMeeting}
+        onNewMeeting={openNewMeeting}
+        onNavigateWeek={navigateWeek}
+        onMoveDue={moveDue}
+      />
     {:else}<section class="placeholder">
-        <h2>{workspace.view === 'week' ? 'Week' : 'Notes'} preview</h2>
-        <p>
-          {workspace.view === 'week'
-            ? 'Week planning and meeting editing arrive in M4.'
-            : 'Project Notes is reserved for a later milestone.'}
-        </p>
+        <h2>Notes preview</h2>
+        <p>Project Notes is reserved for a later milestone.</p>
         <button class="outline" onclick={() => navigate(active, 'board')}
           >Return to Board</button
         >
@@ -534,6 +736,7 @@
             ? new Intl.DateTimeFormat('en-US', {
                 timeZone: workspace.timeZone,
                 dateStyle: 'full',
+                hour12: true,
                 timeStyle: 'medium',
               }).format(new Date(workspace.nowUtc)) + ' · Live fixture'
             : 'Your local workspace'}
@@ -586,8 +789,12 @@
     tags={workspace.board?.tags ?? []}
     timeZone={workspace.timeZone}
     stagedAttachments={workspace.staged}
-    onCreate={async (input) => { createdTask = await workspace.createTask(input); return createdTask; }}
+    onCreate={async (input) => {
+      createdTask = await workspace.createTask(input);
+      return createdTask;
+    }}
     onCreated={(plan) => void created(plan)}
+    onMeeting={openNewMeeting}
     onStage={(paths) => workspace.stage(paths)}
     onDiscardStaged={(tokens) => workspace.discard(tokens)}
     onOpenExternalUrl={commands.openExternalUrl}
@@ -597,6 +804,15 @@
   <TaskDetailDialog
     bind:this={detailDialog}
     detail={workspace.detail}
+    linkedMeetingsDate={workspace.agenda.linkedDate || workspace.selectedDate}
+    linkedMeetings={workspace.agenda.linked}
+    linkedError={workspace.agenda.linkedError}
+    onOpenMeeting={openMeeting}
+    onMeetingWeek={(date) =>
+      workspace.agenda.loadLinked(workspace.detail!.task.id, {
+        date,
+        timeZone: workspace.timeZone,
+      })}
     time={workspace.timeBindings(workspace.detail.task.id)}
     tags={workspace.board?.tags ?? workspace.detail.tags}
     timeZone={workspace.timeZone}
@@ -626,6 +842,69 @@
     }}
     onClose={() => void closeEditor()}
   />
+{/if}
+
+{#if workspace.agenda.recovery}<div class="agenda-recovery" role="alert">
+    {workspace.agenda.error}<button
+      class="primary"
+      disabled={workspace.agenda.pending}
+      onclick={retryAgenda}>Retry exact action</button
+    >
+  </div>{/if}
+{#if due}<DueDateDialog
+    bind:this={dueDialog}
+    draft={due.draft}
+    taskTitle={due.title}
+    reason={due.reason}
+    timeZone={workspace.timeZone}
+    pending={workspace.agenda.pending}
+    recoveryRequired={workspace.agenda.recovery}
+    error={workspace.agenda.error}
+    onChange={(d) => {
+      if (due) due.draft = d;
+    }}
+    onSave={saveDue}
+    onCancel={() => closeEditor()}
+    onRetry={retryAgenda}
+  />{/if}
+{#if workspace.editor?.kind === 'new-meeting'}
+  <NewMeetingDialog
+    bind:this={newMeetingDialog}
+    projects={workspace.projects}
+    projectId={workspace.editor.projectId}
+    nowUtc={workspace.nowUtc}
+    timeZone={workspace.timeZone}
+    pending={workspace.agenda.pending}
+    recovery={workspace.agenda.recovery}
+    error={workspace.agenda.error}
+    onSave={(c, fp) => workspace.agendaAction(c, fp)}
+    onPreview={agendaApi.previewMeetingChange}
+    onSearch={agendaApi.searchAgendaTasks}
+    onClose={() => closeEditor()}
+    onRetry={retryAgenda}
+    onOpenTask={openTask}
+    onJoin={commands.openExternalUrl}
+    onSwitchTask={openNew}
+  />
+{:else if workspace.editor?.kind === 'meeting' && workspace.agenda.detail}
+  {#key JSON.stringify(workspace.editor.ref)}<MeetingDetailDialog
+      bind:this={meetingDialog}
+      detail={workspace.agenda.detail}
+      projects={workspace.projects}
+      projectId={workspace.agenda.detail.occurrence.project_id}
+      nowUtc={workspace.nowUtc}
+      timeZone={workspace.timeZone}
+      pending={workspace.agenda.pending}
+      recovery={workspace.agenda.recovery}
+      error={workspace.agenda.error}
+      onSave={(c, fp) => workspace.agendaAction(c, fp)}
+      onPreview={agendaApi.previewMeetingChange}
+      onSearch={agendaApi.searchAgendaTasks}
+      onClose={() => closeEditor()}
+      onRetry={retryAgenda}
+      onOpenTask={openTask}
+      onJoin={commands.openExternalUrl}
+    />{/key}
 {/if}
 
 <dialog
@@ -664,6 +943,10 @@
     background: var(--surface-2);
     color: var(--text-muted);
     font-size: var(--text-label);
+  }
+  .agenda-page {
+    height: calc(100vh - var(--header-height));
+    overflow: hidden;
   }
   .project-page {
     min-height: 0;
@@ -902,9 +1185,7 @@
   .toggle.on span {
     background: var(--on-accent);
     transform: translateX(
-      calc(
-        var(--toggle-width) - var(--toggle-knob) - 2 * var(--toggle-inset)
-      )
+      calc(var(--toggle-width) - var(--toggle-knob) - 2 * var(--toggle-inset))
     );
   }
   .tray-tip {

@@ -9,6 +9,7 @@
     new Intl.DateTimeFormat('en-US', {
       timeZone,
       dateStyle: 'medium',
+      hour12: true,
       timeStyle: 'medium',
     }).format(new Date(value));
 </script>

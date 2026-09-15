@@ -30,7 +30,7 @@
     running?: boolean;
     preview?: 'drag' | 'drop' | null;
     dragSource?: boolean;
-    onOpen: () => void;
+    onOpen: (event: MouseEvent) => void;
     onStatus: (status: TaskStatus) => void;
     onDrag: (event: PointerEvent, id: string) => void;
   } = $props();
@@ -51,6 +51,7 @@
   <button
     class="card-open"
     onclick={onOpen}
+    onpointerdown={(event) => { if (!preview && !pending) onDrag(event, task.id); }}
     aria-label={`Open ${task.title}${running ? ', timer running' : ''}`}
     disabled={pending || !!preview}
     ><span class="title"
@@ -137,7 +138,9 @@
   }
   article.drag-preview {
     opacity: var(--opacity-drag-preview);
+    border-style: dashed;
     border-color: var(--accent);
+    background: var(--selection-fill);
     pointer-events: none;
   }
   article.drop-preview {
@@ -152,6 +155,8 @@
     color: var(--text);
   }
   .card-open {
+    touch-action: none;
+    cursor: grab;
     width: 100%;
     text-align: left;
     display: flex;

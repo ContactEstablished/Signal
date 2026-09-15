@@ -2,6 +2,8 @@
    Orange is reserved for urgency; project defaults exclude it. */
 :root {
   color-scheme: dark;
+  --agenda-week-min-height: 420px;
+  --agenda-picker-height: 140px;
   --bg: #0f121a;
   --bg-raised: #12161f;
   --surface: #171b26;

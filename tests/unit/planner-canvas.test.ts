@@ -20,6 +20,12 @@ it('selects a scrolled reverse range and cancels captured gestures without writi
  const {props,wrapper,grid}=setup();pointer(grid,'pointerdown',310);pointer(wrapper,'pointerup',220);expect(props.onSelect).toHaveBeenCalledWith(540,630,expect.any(DOMRect));
  pointer(grid,'pointerdown',220);pointer(wrapper,'pointercancel',310);pointer(wrapper,'pointerup',310);expect(props.onSelect).toHaveBeenCalledTimes(1);expect(props.onMove).not.toHaveBeenCalled();
 });
+
+it('labels the calendar and current-time marker in AM/PM', () => {
+ setup();
+ expect([...document.querySelectorAll('.hour span')].map(e=>e.textContent)).toContain('1:00 PM');
+ expect(document.querySelector('.now time')?.textContent).toBe('12:00 PM');
+});
 it('preserves move duration, submits once and restores the source after rejection',async()=>{
  let reject!:(e:Error)=>void;const move=vi.fn(()=>new Promise<void>((_,r)=>reject=r));
  const block={id:'b',kind:'focus',start_min:540,end_min:600,title:'Focus',project_name:null,project_color:null,task_id:null,block:{id:'b',date:'2025-09-12',done:0}} as PlannerItem;
@@ -50,4 +56,18 @@ it('filters picker tasks, supports keyboard choice, and keeps a failed selection
  expect(dialog.open).toBe(true);expect(input.value).toBe('Two');
  dialog.dispatchEvent(new Event('cancel',{cancelable:true}));
  expect(cancel).toHaveBeenCalledOnce();
+});
+
+it('previews the same snapped one-hour range that is saved, including near midnight',async()=>{
+ const {wrapper,props}=setup();
+ const canvas=component as {previewTaskDrop:(d:{id:string;title:string;project_color:'cyan';x:number;y:number}|null)=>void;dropTaskAt:(id:string,x:number,y:number)=>Promise<void>};
+ canvas.previewTaskDrop({id:'task',title:'Due soon task',project_color:'cyan',x:250,y:228});flushSync();
+ expect(document.querySelector('[data-task-drop-preview]')?.textContent).toContain('9:15 AM–10:15 AM');
+ await canvas.dropTaskAt('task',250,228);flushSync();expect(props.onDropTask).toHaveBeenCalledWith('task',555);
+ expect(document.querySelector('[data-task-drop-preview]')).toBeNull();
+ wrapper.scrollTop=1000;
+ canvas.previewTaskDrop({id:'task',title:'Due soon task',project_color:'cyan',x:250,y:680});flushSync();
+ expect(document.querySelector('[data-task-drop-preview]')?.textContent).toContain('11:00 PM–12:00 AM (next day)');
+ await canvas.dropTaskAt('task',250,680);expect(props.onDropTask).toHaveBeenLastCalledWith('task',1380);
+ await canvas.dropTaskAt('task',20,200);expect(props.onDropTask).toHaveBeenCalledTimes(2);
 });

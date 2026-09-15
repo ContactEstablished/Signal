@@ -1,15 +1,14 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
+  import { localDateTimeLabel } from '../../domain/time-display';
   import { onMount, untrack, tick } from 'svelte';
   import { X, ExternalLink } from 'lucide-svelte';
   import TaskFields from './TaskFields.svelte';
   import SubtaskList from './SubtaskList.svelte';
   import TaskNotes from './TaskNotes.svelte';
   import TaskTags from './TaskTags.svelte';
-  import TaskTimeCard, {
-    type TimerUiBindings,
-  } from './TaskTimeCard.svelte';
+  import TaskTimeCard, { type TimerUiBindings } from './TaskTimeCard.svelte';
   import AttachmentList from './AttachmentList.svelte';
   import { applyPastedLink } from '../../domain/links';
   import {
@@ -28,6 +27,11 @@
   } from '../../domain/types';
   let {
     detail,
+    linkedMeetings = null,
+    linkedMeetingsDate = '',
+    linkedError = '',
+    onOpenMeeting,
+    onMeetingWeek,
     tags,
     timeZone,
     stagedAttachments,
@@ -49,6 +53,11 @@
     time,
   }: {
     detail: TaskDetail;
+    linkedMeetings?: import('../../domain/agenda').TaskMeetingPage | null;
+    linkedError?: string;
+    linkedMeetingsDate?: string;
+    onOpenMeeting?: (r: import('../../domain/agenda').MeetingRef) => unknown;
+    onMeetingWeek?: (date: string) => unknown;
     tags: Tag[];
     timeZone: string;
     stagedAttachments: StagedAttachment[];
@@ -291,9 +300,7 @@
       notice =
         'Attachment removed. File cleanup will retry when it becomes available.';
   }
-  export async function requestClose(
-    _reason: CloseReason,
-  ): Promise<boolean> {
+  export async function requestClose(_reason: CloseReason): Promise<boolean> {
     await Promise.allSettled([...operations]);
     if (deleted) return true;
     if (time?.recoveryRequired) {
@@ -476,8 +483,7 @@
         class="title"
         value={buffer.title ?? ''}
         disabled={!!pending || confirm || deleteMode}
-        oninput={(e) =>
-          (buffer = { ...buffer, title: e.currentTarget.value })}
+        oninput={(e) => (buffer = { ...buffer, title: e.currentTarget.value })}
         onblur={() => void commit(['title'])}
         onkeydown={(e) => {
           fieldEscape(e, 'title');
@@ -561,8 +567,8 @@
     {#if confirm}<section class="confirm-panel">
         <h3>Unsaved task changes</h3>
         <p>
-          Save your pending edits{logDirty ? ' and time log' : ''} or discard
-          them before closing.
+          Save your pending edits{logDirty ? ' and time log' : ''} or discard them
+          before closing.
         </p>
         <div class="actions">
           <button
@@ -665,21 +671,38 @@
       disabled={!!pending || confirm || deleteMode}
     />
     <div class="eyebrow">Linked meetings</div>
-    {#each detail.meetings as meeting}<button
-        class="linked-meeting"
-        data-color={detail.project.color}
+    <div class="meeting-pages">
+      <button
+        class="outline"
+        disabled={!linkedMeetings}
         onclick={() =>
-          (notice = `${meeting.title} · Meeting details arrive in M4.`)}
+          linkedMeetings && onMeetingWeek?.(linkedMeetings.previous_date)}
+        >‹</button
+      ><span>{linkedMeetings?.week_start ?? 'Loading meetings…'}</span><button
+        class="outline"
+        disabled={!linkedMeetings}
+        onclick={() =>
+          linkedMeetings && onMeetingWeek?.(linkedMeetings.next_date)}>›</button
+      >
+    </div>
+    {#if linkedError}<p class="error">
+        {linkedError}<button
+          onclick={() =>
+            onMeetingWeek?.(linkedMeetings?.week_start ?? linkedMeetingsDate)}
+          >Retry</button
+        >
+      </p>{/if}
+    {#if linkedMeetings && !linkedMeetings.occurrences.length}<p class="muted">
+        No linked meetings this week.
+      </p>{/if}
+    {#each linkedMeetings?.occurrences ?? [] as meeting}<button
+        class="linked-meeting"
+        data-color={meeting.project_color}
+        onclick={() => onOpenMeeting?.(meeting.ref)}
         >{meeting.title}<span
-          >{new Intl.DateTimeFormat('en-US', {
-            timeZone,
-            month: 'short',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-          }).format(new Date(meeting.starts_at))}</span
+          >{localDateTimeLabel(meeting.start_local)} · Notes & attendance ↗</span
         ></button
-      >{:else}<p class="since">No linked meetings</p>{/each}
+      >{/each}
   </aside>
 </dialog>
 

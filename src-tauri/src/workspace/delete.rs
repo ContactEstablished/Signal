@@ -78,6 +78,21 @@ pub async fn graph(conn: &mut SqliteConnection, target: &DeletionTarget) -> Resu
     .filter(|v| ids.contains(&v["task_id"]) || meeting_ids.contains(&v["meeting_id"]))
     .collect::<Vec<_>>());
     result["meetings"] = json!(meetings);
+    let mut agenda = vec![];
+    for m in rows(conn, "SELECT id FROM meetings ORDER BY id", vec![]).await? {
+        let g = crate::agenda::graph(conn, text(&m, "id")?).await?;
+        let linked = ["segment_tasks", "occurrence_tasks"].iter().any(|k| {
+            g[*k]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| ids.contains(&v["task_id"]))
+        });
+        if meeting_ids.contains(&m["id"]) || linked {
+            agenda.push(g);
+        }
+    }
+    result["agenda"] = json!(agenda);
     result["summaries"] = json!(if target.kind == "project" {
         rows(
             conn,
@@ -144,6 +159,14 @@ pub async fn remove(
     let data = graph(&mut tx, target).await?;
     if fingerprint(&data) != expected {
         return Err(AppError::conflict());
+    }
+    for g in data["agenda"].as_array().unwrap() {
+        execute(
+            &mut tx,
+            "UPDATE meetings SET revision=revision+1 WHERE id=?",
+            vec![g["root"]["id"].clone()],
+        )
+        .await?;
     }
     for v in data["attachments"].as_array().unwrap() {
         crate::attachments::queue_copy(&mut tx, v, now).await?;

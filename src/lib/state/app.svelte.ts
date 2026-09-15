@@ -1,3 +1,5 @@
+import { AgendaState } from './agenda.svelte';
+import type { MeetingChange, MeetingRef } from '../domain/agenda';
 import { PlannerState } from './planner.svelte';
 import type { PlannerInput } from '../domain/planner';
 import { TimerState } from './timers.svelte';
@@ -25,6 +27,8 @@ export type Editor =
   | { kind: 'new'; projectId: string }
   | { kind: 'detail'; taskId: string }
   | { kind: 'project'; project: ProjectRecord | null }
+  | { kind: 'new-meeting'; projectId: string }
+  | { kind: 'meeting'; ref: MeetingRef }
   | null;
 export class Workspace {
   foundation = $state<Foundation | null>(null);
@@ -47,6 +51,7 @@ export class Workspace {
   private detailQuery = latestQuery();
   private refreshQuery = latestQuery();
   private revisions = new Map<string, number>();
+  agenda = new AgendaState();
   timers = new TimerState();
   planner = new PlannerState();
   private clock = makeClock();
@@ -82,7 +87,8 @@ export class Workspace {
     const previous = dateAt(this.nowUtc, this.timeZone);
     this.nowUtc = this.clock.nowUtc();
     this.timeZone = this.clock.timeZone;
-    if (this.planner.followToday && this.planner.date) this.planner.date = this.selectedDate;
+    if (this.planner.followToday && this.planner.date)
+      this.planner.date = this.selectedDate;
     if (this.foundation && previous !== dateAt(this.nowUtc, this.timeZone))
       void this.refresh().catch((e) => (this.notice = errorMessage(e)));
   }
@@ -90,6 +96,7 @@ export class Workspace {
     return dateAt(this.nowUtc, this.timeZone);
   }
   async select(active: string, view: 'board' | 'week' | 'notes' = 'board') {
+    this.agenda.invalidate();
     this.active = active;
     this.view = view;
     this.boardQuery.invalidate();
@@ -97,6 +104,7 @@ export class Workspace {
     this.boardError = '';
     if (this.projects.some((p) => p.id === active)) await this.loadBoard();
     if (active === 'day') await this.planner.load(this.timeZone);
+    await this.loadAgenda();
   }
   async loadBoard() {
     const id = this.active;
@@ -113,8 +121,7 @@ export class Workspace {
           this.revisions.set(task.id, task.revision);
       }
     } catch (e) {
-      if (this.boardQuery.current(ticket))
-        this.boardError = errorMessage(e);
+      if (this.boardQuery.current(ticket)) this.boardError = errorMessage(e);
     } finally {
       if (this.boardQuery.current(ticket)) this.boardLoading = false;
     }
@@ -128,6 +135,35 @@ export class Workspace {
       this.revisions.set(id, reply.task.revision);
     }
     return reply;
+  }
+  async loadAgenda() {
+    const q = { date: this.selectedDate, timeZone: this.timeZone };
+    if (this.active === 'today') {
+      await this.agenda.loadToday(q);
+      if (this.agenda.today && this.agenda.today.today !== this.selectedDate) {
+        // Reconcile a native query which crossed midnight with the same shared clock.
+        this.nowUtc = this.clock.nowUtc();
+        if (this.agenda.today.today !== this.selectedDate) {
+          this.agenda.today = null;
+          await this.agenda.loadToday({
+            date: this.selectedDate,
+            timeZone: this.timeZone,
+          });
+        }
+      }
+    }
+    if (
+      this.view === 'week' &&
+      this.projects.some((p) => p.id === this.active)
+    ) {
+      if (this.agenda.followWeek || !this.agenda.weekDate)
+        this.agenda.weekDate = this.selectedDate;
+      await this.agenda.loadWeek({
+        ...q,
+        date: this.agenda.weekDate,
+        projectId: this.active,
+      });
+    }
   }
   async refresh() {
     const ticket = this.refreshQuery.next();
@@ -146,15 +182,28 @@ export class Workspace {
       });
     }
     this.projects = projects;
-    if (this.planner.scope !== 'all' && !projects.some(p => p.id === this.planner.scope)) this.planner.scope = 'all';
+    if (
+      this.planner.scope !== 'all' &&
+      !projects.some((p) => p.id === this.planner.scope)
+    )
+      this.planner.scope = 'all';
     if (this.active === 'day') await this.planner.load(this.timeZone);
     await this.loadBoard();
+    await this.loadAgenda();
     if (
       this.refreshQuery.current(ticket) &&
       this.editor?.kind === 'detail' &&
       this.detail
     )
       await this.loadDetail(this.editor.taskId);
+    if (this.editor?.kind === 'detail')
+      await this.agenda.loadLinked(this.editor.taskId, {
+        date:
+          this.agenda.linkedTaskId === this.editor.taskId
+            ? this.agenda.linkedDate || this.selectedDate
+            : this.selectedDate,
+        timeZone: this.timeZone,
+      });
   }
   private publish(reply: unknown) {
     if (!reply || typeof reply !== 'object') return;
@@ -179,10 +228,7 @@ export class Workspace {
         };
         this.board = {
           ...this.board,
-          tasks: [
-            ...this.board.tasks.filter((t) => t.id !== task.id),
-            task,
-          ],
+          tasks: [...this.board.tasks.filter((t) => t.id !== task.id), task],
         };
       }
     } else if ('id' in reply && 'color' in reply) {
@@ -190,15 +236,18 @@ export class Workspace {
       this.projects = [
         ...this.projects.filter((p) => p.id !== project.id),
         project,
-      ].sort(
-        (a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id),
-      );
+      ].sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id));
     }
   }
 
-  private mutate<T>(operation: () => Promise<T>, plannerRetry = false): Promise<T> {
+  private mutate<T>(
+    operation: () => Promise<T>,
+    retryKind: 'planner' | 'agenda' | null = null,
+  ): Promise<T> {
     return this.queue.enqueue(async () => {
-      if (!plannerRetry) this.planner.assertWritable();
+      if (retryKind !== 'planner') this.planner.assertWritable();
+      if (retryKind !== 'agenda') this.agenda.assertWritable();
+      this.agenda.invalidate();
       this.planner.invalidate();
       let result: T;
       try {
@@ -256,9 +305,7 @@ export class Workspace {
     });
   }
   patch(id: string, patch: TaskPatch) {
-    return this.mutate(() =>
-      commands.updateTask(id, patch, this.revision(id)),
-    );
+    return this.mutate(() => commands.updateTask(id, patch, this.revision(id)));
   }
   moveTask(id: string, status: TaskStatus, before: string | null) {
     return this.mutate(() =>
@@ -370,7 +417,13 @@ export class Workspace {
     this.timeBusy.add(id);
     try {
       await this.mutate(async () => {
-        const result = await this.timers.execute(id, action, log, retry, blockId);
+        const result = await this.timers.execute(
+          id,
+          action,
+          log,
+          retry,
+          blockId,
+        );
         this.boardQuery.invalidate();
         this.detailQuery.invalidate();
         this.refreshQuery.invalidate();
@@ -381,25 +434,41 @@ export class Workspace {
       this.timeBusy.delete(id);
     }
   }
-  async plannerAction(action: PlannerInput['action'], payload: Record<string,unknown>, fingerprint?: string) {
-    this.planner.reserve(action,payload,fingerprint);
-    try { return await this.commitPlanner(false); }
-    catch(e) { this.planner.cancelReserved(e); throw e; }
+  async plannerAction(
+    action: PlannerInput['action'],
+    payload: Record<string, unknown>,
+    fingerprint?: string,
+  ) {
+    this.planner.reserve(action, payload, fingerprint);
+    try {
+      return await this.commitPlanner(false);
+    } catch (e) {
+      this.planner.cancelReserved(e);
+      throw e;
+    }
   }
   async retryPlanner() {
-    if (this.planner.pending) throw new Error('A planner operation is pending.');
+    if (this.planner.pending)
+      throw new Error('A planner operation is pending.');
     return this.commitPlanner(true);
   }
   private commitPlanner(retry: boolean) {
-    return this.mutate(async () => {
-      if (Object.values(this.timers.recovery).some(Boolean)) throw new Error('Resolve pending task time with Retry before changing the planner.');
-      await commands.setEditGuard(true);
-      const result = await this.planner.execute(retry);
-      for (const detail of result.changed_details) this.publish(detail);
-      this.timers.publish(result.snapshot.timers);
-      for (const [id,entries] of Object.entries(result.changed_entries)) this.timers.entries[id]=entries;
-      return result;
-    },retry);
+    return this.mutate(
+      async () => {
+        if (Object.values(this.timers.recovery).some(Boolean))
+          throw new Error(
+            'Resolve pending task time with Retry before changing the planner.',
+          );
+        await commands.setEditGuard(true);
+        const result = await this.planner.execute(retry);
+        for (const detail of result.changed_details) this.publish(detail);
+        this.timers.publish(result.snapshot.timers);
+        for (const [id, entries] of Object.entries(result.changed_entries))
+          this.timers.entries[id] = entries;
+        return result;
+      },
+      retry ? 'planner' : null,
+    );
   }
   timeBindings(id: string): TimerUiBindings {
     return {
@@ -423,6 +492,34 @@ export class Workspace {
         else await this.timers.load(id);
       },
     };
+  }
+  async agendaAction(change: MeetingChange, fingerprint?: string) {
+    this.agenda.reserve(change, fingerprint);
+    try {
+      return await this.commitAgenda(false);
+    } catch (e) {
+      this.agenda.cancelReserved(e);
+      throw e;
+    }
+  }
+  async retryAgenda() {
+    if (this.agenda.pending) throw new Error('An agenda action is pending.');
+    return this.commitAgenda(true);
+  }
+  private commitAgenda(retry: boolean) {
+    return this.mutate(
+      async () => {
+        if (Object.values(this.timers.recovery).some(Boolean))
+          throw new Error('Resolve pending timer changes first.');
+        await commands.setEditGuard(true);
+        const r = await this.agenda.execute();
+        for (const d of r.changed_details) this.publish(d);
+        this.board = null;
+        this.planner.snapshot = null;
+        return r;
+      },
+      retry ? 'agenda' : null,
+    );
   }
   settled() {
     return this.queue.settled();

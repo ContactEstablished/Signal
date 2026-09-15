@@ -1,6 +1,7 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
+  import TimeInput from '../TimeInput.svelte';
   import {
     statuses,
     statusLabels,
@@ -183,9 +184,10 @@
         }}
       /></label
     ><label class="field"
-      ><span>Time · {timeZone}</span><input
-        type="time"
-        bind:value={time}
+      ><span>Time · {timeZone}</span><TimeInput
+        label="Deadline time"
+        value={time}
+        oninput={(v) => { time = v; }}
         disabled={!date || disabled}
         onchange={due}
       /></label

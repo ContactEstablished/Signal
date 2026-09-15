@@ -2,6 +2,23 @@
 
 Offline desktop workspace built with Tauri 2, Svelte 5 runes, TypeScript, Vite, and SQLite. **M1–M3 are complete and manually accepted.** Projects, Board, task editors, attachments, concurrent persisted timers, and manual time logging have production code. Your Day includes scheduling, overlap lanes, block timers, carry-over, quick time/date editing and planning shortcuts. See [M3 verification and final acceptance](docs/verification/M3.md).
 
+## Personal Windows installation
+
+```powershell
+. ./scripts/dev-env.ps1
+pnpm build:installer
+```
+
+Run the installer from `src-tauri/target/release/bundle/nsis/`. It installs Signal for the current Windows user. The installed release starts empty, uses the real clock, and rejects `--seed`. Launch it from the Signal Start menu shortcut; Node, Rust, and the development server are not needed to run it.
+
+The personal build uses `com.contactestablished.signal`, with its SQLite database, attachments, and preferences in `%APPDATA%\com.contactestablished.signal`. Default development keeps `dev.contactestablished.signal` and all existing test data. `pnpm dev:seed` continues to open the existing September fixture workspace. Both copies can run independently.
+
+For future personal updates, keep the personal identifier unchanged. Close the installed app and copy its entire `%APPDATA%\com.contactestablished.signal` folder somewhere safe before running a new installer. Upgrades apply database migrations in place; they must never reset the database or copy fixture data into it. See [AGENTS.md](AGENTS.md) for the development isolation rules.
+
+## Development
+
+Meeting time controls and selectable weekly weekdays have development-only improvements pending an explicit live-update request. See [behavior, compatibility, and verification](docs/verification/meeting-time-weekdays.md). The personal installation remains on its existing build.
+
 Use Node 22.14+, pnpm 10.33.2, Rust stable MSVC, Visual Studio's Desktop development with C++ workload, Windows SDK, and WebView2.
 
 ```powershell
@@ -23,7 +40,7 @@ Close the running instance before switching between ordinary and seeded developm
 
 Settings → Notifications → Keep running in the system tray defaults OFF. When enabled, native Close hides Signal; the Signal tray icon → Open restores it, and Quit exits.
 
-See [M1 results, acceptance, and click-paths](docs/verification/M1.md), [M0 verification](docs/verification/M0.md), [approved M1 decisions](docs/Features/Signal/Phase-1-Decisions.md), and [milestone plan](PLAN.md). See [M2 results and final acceptance](docs/verification/M2.md). M3 is complete; M4 Today, Week and meeting management kickoff is authorized.
+See [M1 results, acceptance, and click-paths](docs/verification/M1.md), [M0 verification](docs/verification/M0.md), [approved M1 decisions](docs/Features/Signal/Phase-1-Decisions.md), and [milestone plan](PLAN.md). See [M2 results and final acceptance](docs/verification/M2.md). M3 is complete. M4 D1–D8 are approved; the [M4 kickoff and three task/spec pairs](docs/Features/Signal/Tasks/Phase-4-Overview.md) and [execution prompt](docs/Features/Signal/Execution-4-Prompt.md) are ready. All three M4 task/spec pairs are implemented: Today, Week and meeting management. The milestone remains partial pending the required native/manual acceptance in [M4 verification](docs/verification/M4.md). The user authorized committing and pushing the current development work on September 15, 2026; this does not update the personal installation. Automated checks pass (147 frontend tests and 49 Rust tests).
 
 Select a project → Board → New task, or press `n` outside a text field. `Ctrl+Enter` creates; `Ctrl+Shift+Enter` creates and opens Your Day to schedule the task. Open a card to edit fields, subtasks, Markdown notes, tags, alerts, and attachments. The project menu provides edit, reorder, and confirmed permanent deletion.
 

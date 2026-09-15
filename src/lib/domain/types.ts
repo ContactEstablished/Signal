@@ -80,6 +80,7 @@ export interface Alert {
   offset_min: number;
 }
 export interface Meeting {
+  ref?: import('./agenda').MeetingRef;
   id: Id;
   project_id: Id;
   title: string;
@@ -109,6 +110,7 @@ export interface TaskDetail {
   tags: Tag[];
   attachments: Attachment[];
   alerts: Alert[];
+  /** @deprecated Empty compatibility field; use bounded getTaskMeetings. */
   meetings: Meeting[];
 }
 export interface StagedAttachment {

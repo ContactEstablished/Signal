@@ -1,6 +1,6 @@
 # Signal implementation plan
 
-Status: M0 and M1 complete. On September 12, 2026, the user confirmed all M1 manual acceptance checks passed and authorized the milestone commit and push. See `docs/verification/M1.md` for automated results, native evidence, and user sign-off. M2 is complete and manually accepted on September 13, 2026, including the timer discovery and Board overflow refinements. See `docs/verification/M2.md`. M3 is complete and manually accepted September 13, 2026; its commit and push are authorized. See `docs/verification/M3.md` for actual automated/native evidence and final user sign-off. M4 kickoff is authorized; its unresolved product decisions are next. Assisted meeting/task intake was requested September 13, 2026 and is recorded below as proposed M8 work.
+Status: M0 and M1 complete. On September 12, 2026, the user confirmed all M1 manual acceptance checks passed and authorized the milestone commit and push. See `docs/verification/M1.md` for automated results, native evidence, and user sign-off. M2 is complete and manually accepted on September 13, 2026, including the timer discovery and Board overflow refinements. See `docs/verification/M2.md`. M3 is complete and manually accepted September 13, 2026; its commit and push are authorized. See `docs/verification/M3.md` for actual automated/native evidence and final user sign-off. M4 D1–D8 are approved September 13, 2026 and kickoff is ready: three task/spec pairs and an execution prompt are in docs/Features/Signal. M4 is implemented through all three task/spec pairs; the milestone is partial pending the native/manual gates in docs/verification/M4.md. Automated checks pass (147 frontend tests, 49 Rust tests). The unattended hardening audit is complete for review; the user authorized committing and pushing the current development work on September 15, 2026, while manual acceptance remains pending. Assisted meeting/task intake was requested September 13, 2026 and is recorded below as proposed M8 work.
 
 ## Sources and scope
 
@@ -217,6 +217,8 @@ Execution status: **complete and manually accepted September 13, 2026.** D1–D8
 
 ### M4 — Today digest & Week (`#2d`, `#3d`, `#3b`)
 
+Execution status: **implementation delivered; partial pending native/manual acceptance.** D1–D8 approved as proposed September 13, 2026. See [decisions](docs/Features/Signal/Phase-4-Decisions.md), [three task/spec pairs and ownership](docs/Features/Signal/Tasks/Phase-4-Overview.md), and [Execution-4-Prompt](docs/Features/Signal/Execution-4-Prompt.md). Native persistence/calendar rules, Today/Week presentation, and meeting UI/integration are separate bounded tasks. See [M4 verification](docs/verification/M4.md) for actual automated/native results, exact launch commands, remaining click paths and why the completion commit is deferred. No M5 work has started.
+
 - Build Today title/date/counts, seven-day strip, Overdue/Due today/Tomorrow, meetings with next Join action, per-project Hours this week, and Plan links into Your Day.
 - Build project Week navigation, seven due-date buckets, 200px later/no-date column, compact task cards, dashed meeting pills/placeholders, overdue counts, and today wash.
 - Drag to change due date using the approved treatment of time-of-day; synchronize Board, Today, Week, and Your Day queries.
@@ -305,7 +307,7 @@ These questions identify gaps rather than granting permission to invent behavior
 
 ### Before M4–M7
 
-- Define recurring meeting timezone/DST behavior, occurrence vs series edits, attendance UI, meeting notes appearing in linked-task activity, and Week drag preservation of due time. The Week mock shows a dated subtask although the subtask schema has no date; confirm whether that is display-only reference content or a required data-model addition.
+- M4 meeting timezone/DST, occurrence/series edits, attendance/notes, Week due-time preservation and display-only dated subtasks are resolved by approved D1–D8 in docs/Features/Signal/Phase-4-Decisions.md. The paired M4 specifications define execution; no additional approval is needed for that set.
 - Define summary deduplication, weekend meaning of Yesterday, source-toggle mapping for meetings, since-date history, treatment of non-task blocks, and sent status after Copy/`mailto:`. The README says tabs only for manager projects, so the mock's self-summary CLI tab does not override it. Confirm whether separate project Notes/self summaries are required.
 - Define missed-notification handling after sleep/quiet hours, snooze persistence, and whether close-to-tray stays opt-in in M6. Confirm how the UI records sent summaries so reminders can stop reliably.
 - Supply/approve CSV formats and mappings, duplicate policy, import preview/error copy, backup replacement behavior, and whether attachment files must travel with the SQLite export.

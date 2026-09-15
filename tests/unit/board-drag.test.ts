@@ -65,6 +65,7 @@ function pointer(
   flushSync();
 }
 function setup() {
+  const open = vi.fn();
   const running = new SvelteSet<string>();
   const task = (id: string, status: TaskStatus): BoardTask => ({
     ...newTaskDraft('p'),
@@ -130,7 +131,7 @@ function setup() {
       timeZone: 'America/New_York',
       selectedDate: '2025-09-11',
       onRetry: () => {},
-      onOpenTask: () => {},
+      onOpenTask: open,
       onMoveTask: move,
       onPreview: () => {},
     },
@@ -144,12 +145,18 @@ function setup() {
   const b = lane.querySelector<HTMLElement>('[data-task-id="B"]')!;
   b.getBoundingClientRect = () => rect(300);
   hit.mockReturnValue(b);
-  return { source, grip, lane, b, move, resolve, reject, running };
+  return { source, grip, lane, b, move, resolve, reject, running, open, state };
 }
 it('shows the actual card as an inert preview, holds its slot, and becomes solid on drop before save completes', async () => {
   const { source, grip, lane, move, resolve } = setup();
   pointer(grip, 'pointerdown', 20, 320);
   pointer(window, 'pointermove', 250, 290);
+  const floating = document.querySelector<HTMLElement>('[data-task-drag-ghost]')!;
+  expect(floating.textContent).toContain('A');
+  expect(floating.textContent).toContain('Release to move to To Do');
+  expect(floating.style.left).toBe('264px');
+  expect(floating.style.top).toBe('304px');
+  expect(floating.getAttribute('aria-hidden')).toBe('true');
   const preview = lane.querySelector<HTMLElement>('[data-drop-preview]')!;
   expect(preview.textContent).toContain('A');
   expect(preview.textContent).toContain('2/4h');
@@ -162,6 +169,7 @@ it('shows the actual card as an inert preview, holds its slot, and becomes solid
   // Without the placeholder hit guard this position crosses B's midpoint and flips the anchor.
   pointer(window, 'pointermove', 250, 360);
   pointer(window, 'pointerup', 250, 360);
+  expect(document.querySelector('[data-task-drag-ghost]')).toBeNull();
   expect(move).toHaveBeenCalledExactlyOnceWith('A', 'todo', 'B');
   expect(lane.querySelector('.drop-preview')).not.toBeNull();
   expect(document.querySelector('[data-task-id="A"]')).toBeNull();
@@ -171,6 +179,61 @@ it('shows the actual card as an inert preview, holds its slot, and becomes solid
     expect(lane.querySelector('[data-drop-preview]')).toBeNull();
   });
   expect(released).toHaveBeenCalledWith(7);
+});
+
+it('drags by the card body without opening it, while ordinary and keyboard clicks still open', () => {
+  const { source, open, move } = setup();
+  const card = source.querySelector<HTMLButtonElement>('.card-open')!;
+  pointer(card, 'pointerdown', 20, 320);
+  pointer(window, 'pointerup', 20, 320);
+  card.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+  expect(open).toHaveBeenCalledExactlyOnceWith('A');
+  open.mockClear();
+  pointer(card, 'pointerdown', 20, 320);
+  pointer(window, 'pointermove', 250, 290);
+  expect(document.querySelector('[data-task-drag-ghost]')).not.toBeNull();
+  hit.mockReturnValue(document.body);
+  pointer(window, 'pointerup', 900, 100);
+  card.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+  expect(open).not.toHaveBeenCalled();
+  expect(move).not.toHaveBeenCalled();
+  card.click();
+  expect(open).toHaveBeenCalledExactlyOnceWith('A');
+});
+
+it.each(['in_progress', 'blocked', 'done'] as const)('previews and saves a drop into the empty %s column', async status => {
+  const { grip, move, resolve } = setup();
+  const lane = document.querySelector<HTMLElement>(`[data-status="${status}"]`)!;
+  hit.mockReturnValue(lane.querySelector('.empty'));
+  pointer(grip, 'pointerdown', 20, 320);
+  pointer(window, 'pointermove', 250, 290);
+  expect(lane.querySelector('[data-drop-preview]')?.textContent).toContain('A');
+  expect(lane.classList.contains('drop-target')).toBe(true);
+  // The preview replaces the empty message; browser hit testing now sees the column.
+  hit.mockReturnValue(lane);
+  pointer(window, 'pointerup', 250, 290);
+  expect(move).toHaveBeenCalledExactlyOnceWith('A', status, null);
+  resolve();
+  await vi.waitFor(() => expect(lane.querySelector('[data-task-id="A"]')).not.toBeNull());
+  expect(document.querySelector('[data-task-drag-ghost]')).toBeNull();
+});
+
+it('clears both drag previews on lost capture, window blur, or a project change', () => {
+  const { grip, move, state } = setup();
+  const begin = () => { pointer(grip, 'pointerdown', 20, 320); pointer(window, 'pointermove', 250, 290); };
+  begin();
+  pointer(grip, 'lostpointercapture', 250, 290);
+  expect(document.querySelector('[data-task-drag-ghost]')).toBeNull();
+  expect(document.querySelector('[data-drop-preview]')).toBeNull();
+  begin();
+  window.dispatchEvent(new Event('blur')); flushSync();
+  expect(document.querySelector('[data-task-drag-ghost]')).toBeNull();
+  begin();
+  const snapshot = state.get('snapshot')!;
+  state.set('snapshot', { ...snapshot, project: { ...snapshot.project, id: 'other' } }); flushSync();
+  expect(document.querySelector('[data-task-drag-ghost]')).toBeNull();
+  expect(document.querySelector('[data-drop-preview]')).toBeNull();
+  expect(move).not.toHaveBeenCalled();
 });
 it('restores the original card and error on rejected drop without a duplicate save', async () => {
   const { grip, move, reject } = setup();

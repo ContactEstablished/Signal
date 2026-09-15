@@ -1,3 +1,4 @@
+import { initializeAgenda } from '../native/agenda';
 import { initializeTimers } from '../native/timers';
 import type { TimerSnapshot } from '../domain/timers';
 import Database from '@tauri-apps/plugin-sql';
@@ -42,13 +43,16 @@ export async function openFoundation(): Promise<Foundation> {
   }
   const timerSnapshot = await initializeTimers();
   now = new Date(Date.now() + timerSnapshot.offset_ms);
+  await initializeAgenda(
+    zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+  );
   await invoke('initialize_workspace');
   const projects = await db.select<Project[]>(
     'SELECT id,name,color FROM projects ORDER BY sort_order,id',
   );
-  const tasks = await db.select<
-    { due_at: string | null; status: string }[]
-  >('SELECT due_at,status FROM tasks');
+  const tasks = await db.select<{ due_at: string | null; status: string }[]>(
+    'SELECT due_at,status FROM tasks',
+  );
   const [counts] = await db.select<Foundation['counts'][]>(
     `SELECT (SELECT COUNT(*) FROM tasks) AS tasks, (SELECT COUNT(*) FROM meetings) AS meetings, (SELECT COUNT(*) FROM blocks) AS blocks, (SELECT COUNT(*) FROM time_entries) AS time_entries`,
   );

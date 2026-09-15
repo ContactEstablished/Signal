@@ -3,6 +3,7 @@
 <script lang="ts">
   import type { Meeting, ProjectRecord } from '../../domain/types';
   import { meetingLayout } from '../../domain/board';
+  import { localMinute, minuteLabel } from '../../domain/planner-rules';
   import { dateAt } from '../../domain/clock';
   let {
     meetings,
@@ -11,28 +12,21 @@
     nowUtc,
     timeZone,
     onPreview,
+    onOpenMeeting,
   }: {
     meetings: Meeting[];
     project: ProjectRecord;
     selectedDate: string;
     nowUtc: string;
     timeZone: string;
+    onOpenMeeting?: (ref: import('../../domain/agenda').MeetingRef) => unknown;
     onPreview: (message: string) => void;
   } = $props();
   let layout = $derived(meetingLayout(meetings, selectedDate, timeZone));
   let visible = $derived(layout.filter((r) => !r.outside));
   let rows = $derived(Math.max(1, ...visible.map((r) => r.lane + 1)));
-  let localTime = $derived(
-    new Intl.DateTimeFormat('en-GB', {
-      timeZone,
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(new Date(nowUtc)),
-  );
-  let minute = $derived(
-    Number(localTime.slice(0, 2)) * 60 + Number(localTime.slice(3)),
-  );
+  let minute = $derived(localMinute(nowUtc, timeZone));
+  let localTime = $derived(minuteLabel(Math.floor(minute)));
   let showNow = $derived(
     dateAt(nowUtc, timeZone) === selectedDate &&
       minute >= 540 &&
@@ -41,6 +35,7 @@
   function time(value: string) {
     return new Intl.DateTimeFormat('en-US', {
       timeZone,
+      hour12: true,
       hour: 'numeric',
       minute: '2-digit',
     }).format(new Date(value));
@@ -66,7 +61,7 @@
     <div class="hours">
       {#each Array.from({ length: 10 }, (_, i) => 9 + i) as hour}<span
           style:left={`${((hour - 9) / 9) * 100}%`}
-          >{hour.toString().padStart(2, '0')}</span
+          >{hour % 12 || 12} {hour < 12 ? 'AM' : 'PM'}</span
         >{/each}
     </div>
     {#each visible as item}<button
@@ -75,9 +70,9 @@
         style:width={`${item.width}%`}
         style:top={`calc(var(--space-1) + ${item.lane} * var(--space-8))`}
         title={`${item.meeting.title} · ${time(item.meeting.starts_at)}`}
-        onclick={() =>
-          onPreview(`${item.meeting.title} · Meeting details arrive in M4.`)}
-        >{item.meeting.title}</button
+        onclick={() => {
+          if (item.meeting.ref) onOpenMeeting?.(item.meeting.ref);
+        }}>{item.meeting.title}</button
       >{/each}{#if showNow}<div
         class="now"
         style:left={`${((minute - 540) / 540) * 100}%`}
@@ -89,7 +84,7 @@
       class="outside"
       onclick={() =>
         onPreview(`${item.meeting.title} · Meeting details arrive in M4.`)}
-      >{time(item.meeting.starts_at)} · {item.meeting.title} · Outside 09–18</button
+      >{time(item.meeting.starts_at)} · {item.meeting.title} · Outside 9 AM–6 PM</button
     >{/each}
 </section>
 
@@ -134,6 +129,7 @@
     border-top: var(--line) solid var(--border-section);
   }
   .hours span {
+    white-space: nowrap;
     position: absolute;
     font: var(--weight-hour) var(--text-meta) var(--font-heading);
     color: var(--text-faint);
@@ -159,6 +155,7 @@
     pointer-events: none;
   }
   .now span {
+    white-space: nowrap;
     position: absolute;
     top: calc(-1 * var(--space-3));
     left: 0;

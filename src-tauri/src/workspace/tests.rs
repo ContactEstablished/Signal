@@ -290,7 +290,7 @@ async fn failed_reply_preparation_rolls_back_the_write() {
         .await
         .unwrap();
     let id = created["task"]["id"].as_str().unwrap();
-    sqlx::raw_sql("ALTER TABLE meetings RENAME TO hidden_meetings")
+    sqlx::raw_sql("ALTER TABLE alerts RENAME TO hidden_alerts")
         .execute(&pool)
         .await
         .unwrap();

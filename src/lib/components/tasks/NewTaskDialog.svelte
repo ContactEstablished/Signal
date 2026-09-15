@@ -36,6 +36,7 @@
     onDiscardStaged,
     onOpenExternalUrl,
     onClose,
+    onMeeting,
   }: {
     projects: ProjectRecord[];
     defaultProjectId: string;
@@ -48,6 +49,7 @@
     onDiscardStaged: (tokens: string[]) => Promise<CleanupResult>;
     onOpenExternalUrl: (url: string) => Promise<void>;
     onClose: () => void;
+    onMeeting?: () => unknown;
   } = $props();
   let draft = $state(newTaskDraft('')),
     baseline = newTaskDraft(''),
@@ -218,10 +220,7 @@
       <span class="chip">Task</span><button
         type="button"
         class="outline"
-        onclick={() =>
-          (notice =
-            'Meeting creation arrives in M4. Your task draft is retained.')}
-        >Meeting</button
+        onclick={() => onMeeting?.()}>Meeting</button
       ><button aria-label="Close new task" onclick={onClose}><X /></button>
     </div>
   </div>

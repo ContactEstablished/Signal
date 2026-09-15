@@ -43,8 +43,7 @@ pub async fn snapshot(
      "claims":rows(conn,"SELECT * FROM planner_claims ORDER BY id",vec![]).await?,
      "dismissed":!rows(conn,"SELECT key FROM settings WHERE key=? AND value='true'",vec![json!(format!("planner_dismissed:{}",q.date))]).await?.is_empty()
     });
-    let mut meetings = vec![];
-    for m in rows(conn,"SELECT m.*,p.name AS project_name,p.color AS project_color FROM meetings m JOIN projects p ON p.id=m.project_id ORDER BY m.id",vec![]).await? { if meeting_range(&m,q)?.is_some() { meetings.push(m); } }
+    let meetings = crate::agenda::occurrences(conn, &utc(start), &utc(end), None, true).await?;
     data["meetings"] = json!(meetings);
     let timer = timers::snapshot(conn, now, offset).await?;
     data["timers"] = json!({"sessions":timer["sessions"]});
