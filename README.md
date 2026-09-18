@@ -53,3 +53,11 @@ Open a task → Time · logged → Start. Pause excludes the paused interval; Re
 Log time asks for local date, start, and duration in hours/minutes/seconds. It shows the timezone and calculated end, rejects future ends, and allows overlaps/overnight entries. Expand Logged entries for read-only history. If a time operation reports an unknown result, use Retry time operation before editing or closing that task; Retry reuses the original request identity to prevent duplicate entries.
 
 The debug seed command is exactly `tauri dev -- -- --seed`. M2 installs its own fixture anchor and two accepted timers once, after M0 data loading. The simulated September clock advances across relaunches. Repeated seeding preserves edited/deleted records and completed/stopped sessions. Ordinary startup uses the real clock and never installs fixtures. See M2 verification for fixture reconciliation and the current acceptance boundary.
+
+## Voice Inbox (development)
+
+Open the header **Voice Inbox** button. In **Settings → Voice & AI**, download `base.en` (148 MB) or the optional `small.en` (488 MB), select your microphone and save. Configure Signal’s own Chat Completions-compatible HTTPS API URL (either the base URL or full `/chat/completions` endpoint), model ID and API key; consent is required before transmitting transcript/project names. Signal does not read Chorus settings or keys. Provider charges may apply; no cloud transcription is used.
+
+Start recording → Stop & analyze → review transcript and project-grouped suggestions → approve any proposed projects → edit/select tasks → Create selected. Accepted tasks enter **To Do**. Open task uses the existing editor. Finish review or Discard draft clears the saved transcript/review; created tasks remain. Offline, local transcription and manual task review still work; suggestions need the configured service. One draft persists across restarts. Relative dates in seeded development use the fixture clock shown by the app.
+
+This feature is implemented in development. Recording/transcription were confirmed by the user and native provider analysis succeeded; final review/acceptance checks remain pending. Launch with `. ./scripts/dev-env.ps1` then `pnpm dev:seed`; no personal reinstall is needed for development. See [setup, privacy, verification and click-paths](docs/verification/voice-inbox.md).

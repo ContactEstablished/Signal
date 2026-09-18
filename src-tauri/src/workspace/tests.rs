@@ -213,10 +213,11 @@ async fn children_due_precision_and_delete_failure_are_transactional() {
     let p = project(&pool).await;
     let mut data = input(&p, "Collections");
     data["due_at"] = json!("2025-09-11T21:00:37.123Z");
-    data["tags"] = json!([{"name":" Review ","color":"cyan"},{"name":"review","color":"lime"}]);
+    data["tags"] = json!([{"name":" Review ","color":"mint"},{"name":"review","color":"lime"}]);
     data["subtasks"] = json!([{"title":"First","done":false},{"title":"Second","done":true}]);
     let created = tasks::create(&pool, data, &now(true)).await.unwrap();
     assert_eq!(created["tags"].as_array().unwrap().len(), 1);
+    assert_eq!(created["tags"][0]["color"], "mint");
     let id = created["task"]["id"].as_str().unwrap();
     let done = tasks::update(
         &pool,
@@ -366,19 +367,31 @@ async fn filtered_anchors_keep_hidden_order_and_noop_keeps_revision() {
 async fn project_edit_preserves_summary_fields_and_reorders_at_boundaries() {
     let pool = database().await;
     let first = project(&pool).await;
-    let second = project(&pool).await;
+    let second_project = projects::save(
+        &pool,
+        None,
+        ProjectInput {
+            name: "Mint project".into(),
+            color: "mint".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(second_project["color"], "mint");
+    let second = second_project["id"].as_str().unwrap().to_owned();
     execute(&mut *pool.acquire().await.unwrap(),"UPDATE projects SET manager_name='Owner',manager_email='owner@example.test',summary_tone='detailed',summary_send_at='17:00' WHERE id=?",vec![json!(first)]).await.unwrap();
     let edited = projects::save(
         &pool,
         Some(first.clone()),
         ProjectInput {
             name: " Renamed ".into(),
-            color: "violet".into(),
+            color: "mint".into(),
         },
     )
     .await
     .unwrap();
     assert_eq!(edited["name"], "Renamed");
+    assert_eq!(edited["color"], "mint");
     assert_eq!(edited["manager_name"], "Owner");
     assert_eq!(edited["summary_tone"], "detailed");
     assert_eq!(edited["summary_send_at"], "17:00");

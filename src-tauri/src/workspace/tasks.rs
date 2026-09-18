@@ -337,7 +337,9 @@ pub async fn set_children(
                 } else {
                     let name = nonblank(text(v, "name")?)?;
                     let color = text(v, "color")?;
-                    choice(color, &["cyan", "lime", "magenta", "violet", "orange"])?;
+                    if color != "orange" {
+                        choice(color, COLORS)?;
+                    }
                     if v.as_object().map_or(true, |m| m.len() != 2) {
                         return Err(AppError::validation("Unknown tag field"));
                     }
@@ -430,6 +432,12 @@ pub async fn children(
     Ok(reply)
 }
 pub async fn create(pool: &SqlitePool, input: Value, now: &str) -> Result<Value> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let reply = create_in(&mut tx, input, now).await?;
+    tx.commit().await?;
+    Ok(reply)
+}
+pub async fn create_in(tx: &mut SqliteConnection, input: Value, now: &str) -> Result<Value> {
     let mut fields = input
         .as_object()
         .ok_or_else(|| AppError::validation("Expected task"))?
@@ -462,26 +470,24 @@ pub async fn create(pool: &SqlitePool, input: Value, now: &str) -> Result<Value>
     } else {
         Value::Null
     };
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     one(
-        &mut tx,
+        tx,
         "SELECT id FROM projects WHERE id=?",
         vec![json!(project)],
     )
     .await?;
     values["sort_order"] = one(
-        &mut tx,
+        tx,
         "SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM tasks WHERE project_id=? AND status=?",
         vec![json!(project), json!(status)],
     )
     .await?["n"]
         .clone();
-    insert(&mut tx, "tasks", &values).await?;
+    insert(tx, "tasks", &values).await?;
     for kind in ["subtasks", "tags", "alerts"] {
-        set_children(&mut tx, &id, kind, &collections[kind]).await?;
+        set_children(tx, &id, kind, &collections[kind]).await?;
     }
-    crate::attachments::adopt(&mut tx, &id, &collections["attachments"]).await?;
-    let reply = detail(&mut tx, &id).await?;
-    tx.commit().await?;
+    crate::attachments::adopt(tx, &id, &collections["attachments"]).await?;
+    let reply = detail(tx, &id).await?;
     Ok(reply)
 }

@@ -80,7 +80,7 @@ pub fn choice(v: &str, choices: &[&str]) -> Result<()> {
     }
 }
 pub const STATUSES: &[&str] = &["backlog", "todo", "in_progress", "blocked", "done"];
-pub const COLORS: &[&str] = &["cyan", "lime", "magenta", "violet"];
+pub const COLORS: &[&str] = &["cyan", "lime", "magenta", "violet", "mint"];
 pub fn row_json(row: sqlx::sqlite::SqliteRow) -> Result<Value> {
     let mut out = Map::new();
     for c in row.columns() {

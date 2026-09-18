@@ -5,7 +5,7 @@ pub mod tasks;
 use models::*;
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
-async fn pool(app: &AppHandle) -> Result<sqlx::SqlitePool> {
+pub(crate) async fn pool(app: &AppHandle) -> Result<sqlx::SqlitePool> {
     crate::db::pool(app)
         .await
         .map_err(|e| AppError::new("Database", e))

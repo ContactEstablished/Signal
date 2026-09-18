@@ -3,6 +3,7 @@ mod attachments;
 mod clock;
 mod db;
 mod exit_guard;
+mod intake;
 mod links;
 mod planner;
 mod timers;
@@ -28,6 +29,7 @@ pub fn run() {
             close_to_tray: AtomicBool::new(false),
         })
         .manage(clock::Clock::default())
+        .manage(intake::Voice::default())
         .manage(window::GeometryReady::default())
         .manage(exit_guard::EditGuard::default())
         .plugin(tauri_plugin_dialog::init())
@@ -39,6 +41,20 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            intake::voice_recovery,
+            intake::set_voice_recovery,
+            intake::voice_settings,
+            intake::save_voice_settings,
+            intake::download_voice_model,
+            intake::start_voice_capture,
+            intake::voice_frame,
+            intake::stop_voice_capture,
+            intake::cancel_voice,
+            intake::load_voice_draft,
+            intake::save_voice_draft,
+            intake::discard_voice_draft,
+            intake::suggest_voice_tasks,
+            intake::accept_voice_tasks,
             agenda::initialize_agenda,
             agenda::get_today,
             agenda::get_week,
@@ -94,6 +110,7 @@ pub fn run() {
                 "attachments"
             });
             app.manage(attachments::Files::new(root).map_err(|e| e.message)?);
+            intake::initialize(app.handle()).map_err(|e| e.message)?;
             tray::setup(app)?;
             let window = app
                 .get_webview_window("main")

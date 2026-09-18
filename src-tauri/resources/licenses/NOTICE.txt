@@ -1,0 +1,10 @@
+Signal Voice Inbox
+
+The voice capture and local transcription integration were adapted from the
+Chorus project at C:/Projects/ContactEstablished/Chorus on September 18, 2026.
+Chorus is licensed under Apache License 2.0; a copy is included alongside
+this notice. Signal changes include Tauri IPC frame delivery, local review
+persistence, task proposals, and explicit batch acceptance.
+
+The bundled whisper.cpp v1.9.2 runtime is MIT licensed. Its license,
+original binary provenance, and SHA-256 manifest are in resources/whisper.

@@ -1,3 +1,4 @@
+import * as voiceApi from '../voice/api';
 import { AgendaState } from './agenda.svelte';
 import type { MeetingChange, MeetingRef } from '../domain/agenda';
 import { PlannerState } from './planner.svelte';
@@ -39,6 +40,7 @@ export class Workspace {
   detail = $state<TaskDetail | null>(null);
   editor = $state<Editor>(null);
   staged = $state<StagedAttachment[]>([]);
+  voiceRecovery = $state(false);
   loading = $state(true);
   boardLoading = $state(false);
   error = $state('');
@@ -74,6 +76,7 @@ export class Workspace {
         const fixtures = await import('../seed-attachments');
         await fixtures.installSeedAttachments();
       }
+      this.voiceRecovery = !!(await voiceApi.recovery());
       this.projects = await commands.listProjects();
       this.planner.initialize(this.selectedDate, this.timeZone);
       await this.planner.load(this.timeZone);
@@ -242,9 +245,10 @@ export class Workspace {
 
   private mutate<T>(
     operation: () => Promise<T>,
-    retryKind: 'planner' | 'agenda' | null = null,
+    retryKind: 'planner' | 'agenda' | 'voice' | null = null,
   ): Promise<T> {
     return this.queue.enqueue(async () => {
+      if (this.voiceRecovery && retryKind !== 'voice') throw new Error('Open Voice Inbox and retry the pending task creation first.');
       if (retryKind !== 'planner') this.planner.assertWritable();
       if (retryKind !== 'agenda') this.agenda.assertWritable();
       this.agenda.invalidate();
@@ -285,6 +289,9 @@ export class Workspace {
     if (revision === undefined)
       throw new Error('Reload this task before editing.');
     return revision;
+  }
+  acceptVoice(input: voiceApi.Acceptance) {
+    return this.mutate(() => voiceApi.accept(input), 'voice');
   }
   createProject(input: { name: string; color: ProjectColor }) {
     return this.mutate(() => commands.createProject(input));

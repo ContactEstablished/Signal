@@ -20,6 +20,7 @@
   --lime: #c1ea55;
   --magenta: #f279c9;
   --violet: #b48cff;
+  --mint: #6ee7b7;
   --warn: #ff9f52;
   --danger: #ff7a7a;
   --on-accent: #04202a;
@@ -30,6 +31,7 @@
   --lime-rgb: 193, 234, 85;
   --magenta-rgb: 242, 121, 201;
   --violet-rgb: 180, 140, 255;
+  --mint-rgb: 110, 231, 183;
   --warn-rgb: 255, 159, 82;
   --project-rgb: var(--cyan-rgb);
   --project-color: var(--accent);
@@ -194,6 +196,10 @@
 [data-color='violet'] {
   --project-color: var(--violet);
   --project-rgb: var(--violet-rgb);
+}
+[data-color='mint'] {
+  --project-color: var(--mint);
+  --project-rgb: var(--mint-rgb);
 }
 [data-color='orange'] {
   --project-color: var(--warn);

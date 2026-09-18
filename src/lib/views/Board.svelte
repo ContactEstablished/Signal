@@ -226,10 +226,13 @@
       });
     }
   }
+  // selectedDate is supplied by the ticking workspace clock. Compare the
+  // actual context value so a same-day clock tick cannot cancel a gesture.
+  const dragContext = $derived(
+    JSON.stringify([snapshot?.project.id, selectedDate, timeZone, filters]),
+  );
   $effect(() => {
-    snapshot?.project.id;
-    selectedDate;
-    JSON.stringify(filters);
+    dragContext;
     untrack(cancel);
   });
   $effect(() => {

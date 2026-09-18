@@ -2,6 +2,8 @@
 
 Status: M0 and M1 complete. On September 12, 2026, the user confirmed all M1 manual acceptance checks passed and authorized the milestone commit and push. See `docs/verification/M1.md` for automated results, native evidence, and user sign-off. M2 is complete and manually accepted on September 13, 2026, including the timer discovery and Board overflow refinements. See `docs/verification/M2.md`. M3 is complete and manually accepted September 13, 2026; its commit and push are authorized. See `docs/verification/M3.md` for actual automated/native evidence and final user sign-off. M4 D1–D8 are approved September 13, 2026 and kickoff is ready: three task/spec pairs and an execution prompt are in docs/Features/Signal. M4 is implemented through all three task/spec pairs; the milestone is partial pending the native/manual gates in docs/verification/M4.md. Automated checks pass (147 frontend tests, 49 Rust tests). The unattended hardening audit is complete for review; the user authorized committing and pushing the current development work on September 15, 2026, while manual acceptance remains pending. Assisted meeting/task intake was requested September 13, 2026 and is recorded below as proposed M8 work.
 
+Voice Inbox is the approved standalone increment requested September 18, 2026. Implementation is in development. The user confirmed recording/transcription; a native provider request saved six unaccepted recommendations. Final visual/review acceptance remains pending. See `docs/Features/Signal/Voice-Inbox-Plan.md` and `docs/verification/voice-inbox.md`. This does not start M5 or complete M8.
+
 ## Sources and scope
 
 - Source of truth: `_design/design_handoff_signal/README.md`, read in full.
@@ -22,7 +24,7 @@ Status: M0 and M1 complete. On September 12, 2026, the user confirmed all M1 man
 - `lucide-svelte` icons at 16px; preserve the meanings of circle, square, check, external-link, grip-vertical, play, and pause. Use the same icon family for other required controls.
 - Markdown uses `marked` followed by sanitization. External links open through a narrow native boundary. Attachment operations copy files into application data, with database metadata pointing to the copied file.
 - Pure TypeScript domain functions are independent of Svelte and native APIs. Vitest covers lane packing, carry-over, timer math, and summary generation. No E2E suite.
-- Offline single-user operation: no accounts, OAuth, provider APIs, remote title fetching, telemetry, or remote assets. Email uses `mailto:` in M5; SMTP is later work outside M0–M7.
+- Offline single-user core: no accounts, OAuth, remote title fetching or telemetry. Exception approved for Voice Inbox: optional, explicitly configured AI provider calls and local speech-model downloads. Email uses `mailto:` in M5; SMTP is later work outside M0–M7.
 - M8's screenshot/text interpretation needs a separate processing decision: local models/OCR or an explicitly configured external service. No provider, credentials, cost, network dependency, or change to the offline baseline is approved by this roadmap addition. Ordinary task, meeting, and planner workflows must remain usable without the optional interpreter.
 
 ## Intended folder structure
@@ -227,6 +229,17 @@ Execution status: **implementation delivered; partial pending native/manual acce
 - Verify: Today → Plan an unplanned due task → Week → drag a card to Friday → task modal shows changed date → create/edit meeting → link ATL-482 → set weekly repeat → check Today/Week/Your Day occurrence → Join opens its external URL.
 - Stubs: native meeting reminders remain M6.
 - Intended commit: `feat(agenda): add Today Week and meeting management`.
+
+### Voice Inbox — approved standalone increment before M5
+
+- Header microphone opens a dedicated recording and editable task-review screen.
+- Local English transcription using the Chorus whisper.cpp approach, base.en by default and optional small.en; five-minute recordings, level meter, stop/cancel, no retained audio archive.
+- Separate Signal provider URL, model and Windows-protected key. Only transcript, project names/IDs and recording date/timezone go to the explicitly configured AI service.
+- Group recommendations by project; edit title, notes, subtasks, deadline, priority and estimate; keep source excerpts and uncertainty visible. Unknown projects need explicit approval and an editable color/name.
+- Create all/some/none through normal native task validation. Accepted tasks always enter To Do. New projects and selected tasks commit atomically with durable retry receipts and duplicate-title acknowledgment.
+- Persist one transcript/review draft across restart, retain unselected candidates, and open accepted tasks in the existing editor. Clear the draft with Finish review or Discard; do not delete created tasks.
+- See the [approved implementation scope](docs/Features/Signal/Voice-Inbox-Plan.md) and [verification/manual click-paths](docs/verification/voice-inbox.md). Implementation is present; the native/manual acceptance gate remains open. Personal installation unchanged.
+- Screenshots, text-file imports, meeting extraction, and other M8 input types remain deferred.
 
 ### M5 — Daily summary (`#2c`, `#3c`)
 

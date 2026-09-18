@@ -1,6 +1,8 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
+  import VoiceInbox from './lib/views/VoiceInbox.svelte';
+  import VoiceSettings from './lib/components/voice/VoiceSettings.svelte';
   import TimerStatus from './lib/components/shell/TimerStatus.svelte';
   import { onMount, tick } from 'svelte';
   import YourDay from './lib/views/YourDay.svelte';
@@ -22,6 +24,7 @@
   } from './lib/domain/agenda';
   import type { TaskDetail } from './lib/domain/types';
   import {
+    Mic,
     Search,
     Plus,
     Settings,
@@ -185,8 +188,10 @@
     }
   }
   let board = $state<Board>(null!);
+  let voice = $state<VoiceInbox | null>(null), voiceGuard = $state(false);
   $effect(() => {
     const guarded =
+      voiceGuard || workspace.voiceRecovery ||
       !!due ||
       workspace.agenda.guarded ||
       !!workspace.editor ||
@@ -210,6 +215,7 @@
     query = $state('');
   const settingPages = [
     'General',
+    'Voice & AI',
     'Notifications',
     'Managers & summaries',
     'Integrations',
@@ -243,6 +249,8 @@
         const editor = currentEditor();
         let proceed = editor ? await editor.requestClose(reason) : true;
         if (proceed && day) proceed = await day.requestClose(reason);
+        if (proceed && voice) proceed = await voice.requestClose(reason);
+        if (workspace.voiceRecovery) proceed = false;
         if (
           workspace.agenda.recovery ||
           workspace.planner.recovery ||
@@ -294,6 +302,7 @@
     destination: string,
     view: 'board' | 'week' | 'notes' = 'board',
   ) {
+    if (destination === 'voice' && workspace.voiceRecovery && !workspace.editor) { await workspace.select(destination, view); return; }
     if (await closeEditor('navigation'))
       await workspace.select(destination, view);
   }
@@ -539,6 +548,7 @@
           true,
         )}><Search /><span>Search or jump to…</span><kbd>Ctrl K</kbd></button
     >
+    <button class="settings-button" class:selected={active === 'voice'} aria-current={active === 'voice' ? 'page' : undefined} onclick={() => navigate('voice')}><Mic />Voice Inbox</button>
     <button
       class="settings-button"
       class:selected={active === 'settings'}
@@ -581,6 +591,8 @@
       <button class="outline" onclick={load}>Retry</button>
     </section>
   </main>
+{:else if active === 'voice'}
+  <VoiceInbox bind:this={voice} {workspace} onOpenTask={id=>openTask(id,true)} onGuard={v=>voiceGuard=v} onSettings={()=>{settingsPage='Voice & AI';void navigate('settings');}} />
 {:else if active === 'settings'}
   <main class="settings-layout">
     <aside class="settings-nav">
@@ -595,7 +607,9 @@
     </aside>
     <section class="settings-content">
       <h1>{settingsPage}</h1>
-      {#if settingsPage === 'Notifications'}
+      {#if settingsPage === 'Voice & AI'}
+        <VoiceSettings />
+      {:else if settingsPage === 'Notifications'}
         <div class="setting-row">
           <div>
             <h3 id="tray-label">Keep running in the system tray</h3>

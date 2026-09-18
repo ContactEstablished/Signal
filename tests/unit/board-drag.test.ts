@@ -3,6 +3,7 @@ import { afterEach, beforeEach, it, expect, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import Board from '../../src/lib/views/Board.svelte';
+import { dateAt } from '../../src/lib/domain/clock';
 import { newTaskDraft } from '../../src/lib/domain/task-draft';
 import type {
   BoardSnapshot,
@@ -67,6 +68,7 @@ function pointer(
 function setup() {
   const open = vi.fn();
   const running = new SvelteSet<string>();
+  const clock = new SvelteMap([['now', '2025-09-11T17:42:00.000Z']]);
   const task = (id: string, status: TaskStatus): BoardTask => ({
     ...newTaskDraft('p'),
     id,
@@ -127,9 +129,13 @@ function setup() {
         return state.get('snapshot')!;
       },
       runningTaskIds: running,
-      nowUtc: '2025-09-11T17:42:00.000Z',
+      get nowUtc() {
+        return clock.get('now')!;
+      },
       timeZone: 'America/New_York',
-      selectedDate: '2025-09-11',
+      get selectedDate() {
+        return dateAt(clock.get('now')!, 'America/New_York');
+      },
       onRetry: () => {},
       onOpenTask: open,
       onMoveTask: move,
@@ -145,7 +151,7 @@ function setup() {
   const b = lane.querySelector<HTMLElement>('[data-task-id="B"]')!;
   b.getBoundingClientRect = () => rect(300);
   hit.mockReturnValue(b);
-  return { source, grip, lane, b, move, resolve, reject, running, open, state };
+  return { source, grip, lane, b, move, resolve, reject, running, open, state, clock };
 }
 it('shows the actual card as an inert preview, holds its slot, and becomes solid on drop before save completes', async () => {
   const { source, grip, lane, move, resolve } = setup();
@@ -311,4 +317,42 @@ it('updates running icons from shared timer state without changing logged totals
   running.delete('B');
   flushSync();
   expect(b.querySelector('.running-indicator')).toBeNull();
+});
+
+it('keeps dragging across clock ticks on the same calendar date, but cancels at midnight', () => {
+  const { grip, clock, move } = setup();
+  pointer(grip, 'pointerdown', 20, 320);
+  pointer(window, 'pointermove', 250, 290);
+  expect(document.querySelector('[data-task-drag-ghost]')).not.toBeNull();
+  clock.set('now', '2025-09-11T17:42:01.000Z');
+  flushSync();
+  expect(document.querySelector('[data-task-drag-ghost]')).not.toBeNull();
+  pointer(window, 'pointermove', 270, 310);
+  expect(document.querySelector<HTMLElement>('[data-task-drag-ghost]')?.style.left).toBe('284px');
+  clock.set('now', '2025-09-12T04:00:00.000Z');
+  flushSync();
+  expect(document.querySelector('[data-task-drag-ghost]')).toBeNull();
+  expect(move).not.toHaveBeenCalled();
+});
+
+it.each(['body', 'grip'])('completes a slow %s drag across multiple live clock ticks exactly once', async handle => {
+  const { source, grip, clock, move, resolve, lane, open } = setup();
+  const start = handle === 'grip' ? grip : source.querySelector<HTMLButtonElement>('.card-open')!;
+  pointer(start, 'pointerdown', 20, 320);
+  pointer(window, 'pointermove', 250, 290);
+  for (const second of ['01', '02', '03']) {
+    clock.set('now', `2025-09-11T17:42:${second}.000Z`);
+    flushSync();
+    expect(document.querySelector('[data-task-drag-ghost]')).not.toBeNull();
+    expect(lane.querySelector('[data-drop-preview]')).not.toBeNull();
+    expect(released).not.toHaveBeenCalled();
+    pointer(window, 'pointermove', 260, 290);
+  }
+  pointer(window, 'pointerup', 260, 290);
+  pointer(window, 'pointerup', 260, 290);
+  expect(move).toHaveBeenCalledExactlyOnceWith('A', 'todo', 'B');
+  expect(open).not.toHaveBeenCalled();
+  resolve();
+  await vi.waitFor(() => expect(lane.querySelector('[data-task-id="A"]')).not.toBeNull());
+  expect(document.querySelector('[data-task-drag-ghost]')).toBeNull();
 });
