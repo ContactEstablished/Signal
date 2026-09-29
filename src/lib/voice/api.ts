@@ -8,6 +8,8 @@ export interface Proposal {
   created_id: string | null;
 }
 export interface Candidate {
+  kind?: "task" | "meeting";
+  meeting?: import("../domain/agenda").SeriesDraft | null;
   id: string;
   selected: boolean;
   project_id: string | null;
@@ -24,6 +26,8 @@ export interface Candidate {
   created_id: string | null;
 }
 export interface Draft {
+  source_kind?: "voice" | "image";
+  image_id?: string | null;
   id: string;
   revision: number;
   recorded_at: string;
@@ -39,7 +43,7 @@ export interface Acceptance {
   candidate_ids: string[];
 }
 export interface Receipt {
-  created: { id: string; project_id: string; title: string }[];
+  created: { id: string; project_id: string; title: string; kind?: "task" | "meeting"; ref?: import("../domain/agenda").MeetingRef }[];
   projects: { id: string; name: string }[];
 }
 export interface VoiceSettings {
@@ -48,6 +52,8 @@ export interface VoiceSettings {
   whisper_model: string;
   microphone: string;
   consent: boolean;
+  image_consent?: boolean;
+  image_model?: string;
 }
 export interface SettingsReply {
   settings: VoiceSettings;

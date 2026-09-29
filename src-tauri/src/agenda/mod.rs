@@ -563,6 +563,57 @@ async fn reply(conn: &mut SqliteConnection, outcome: &Value, replayed: bool) -> 
         json!({"detail":detail,"outcome":outcome,"changed_details":details,"affected_project_ids":projects,"affected_task_ids":tasks,"revision":revision,"replayed":replayed}),
     )
 }
+/// Shared creation path; the caller owns the transaction and receipt.
+pub async fn create_in(
+    conn: &mut SqliteConnection,
+    project_id: &str,
+    draft: &Value,
+    now: &str,
+) -> Result<Value> {
+    let validated = validate_change(
+        conn,
+        &json!({"action":"create","payload":{"projectId":project_id,"draft":draft}}),
+    )
+    .await?;
+    let payload = &validated["payload"];
+    let id = uid();
+    let d = &payload["draft"];
+    let mut m = json!({"id":id,"project_id":payload["projectId"]});
+    for k in [
+        "title",
+        "starts_at",
+        "duration_min",
+        "link_url",
+        "agenda_md",
+        "notes_md",
+        "repeat_rule",
+        "reminder_min",
+        "time_zone",
+        "show_in_day",
+    ] {
+        m[k] = d[k].clone();
+    }
+    insert(conn, "meetings", &m).await?;
+    let v = uid();
+    insert(
+        conn,
+        "meeting_versions",
+        &json!({"id":v,"meeting_id":id,"created_at":now}),
+    )
+    .await?;
+    segment(conn, &v, 0, None, d).await?;
+    execute(
+        conn,
+        "UPDATE meetings SET active_version_id=? WHERE id=?",
+        vec![json!(v), json!(id)],
+    )
+    .await?;
+    for t in d["task_ids"].as_array().unwrap() {
+        insert(conn, "meeting_tasks", &json!({"meeting_id":id,"task_id":t})).await?;
+    }
+    Ok(json!({"meetingId":id,"occurrenceKey":key(0)}))
+}
+
 pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result<Value> {
     if input.request_id.trim().is_empty() {
         return Err(AppError::validation("Missing request identity."));
@@ -621,47 +672,8 @@ pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result
         }
         outcome["task_id"] = json!(id);
     } else if action == "create" {
-        let id = uid();
-        let d = &payload["draft"];
-        let mut m = json!({"id":id,"project_id":payload["projectId"]});
-        for k in [
-            "title",
-            "starts_at",
-            "duration_min",
-            "link_url",
-            "agenda_md",
-            "notes_md",
-            "repeat_rule",
-            "reminder_min",
-            "time_zone",
-            "show_in_day",
-        ] {
-            m[k] = d[k].clone();
-        }
-        insert(&mut tx, "meetings", &m).await?;
-        let v = uid();
-        insert(
-            &mut tx,
-            "meeting_versions",
-            &json!({"id":v,"meeting_id":id,"created_at":now}),
-        )
-        .await?;
-        segment(&mut tx, &v, 0, None, d).await?;
-        execute(
-            &mut tx,
-            "UPDATE meetings SET active_version_id=? WHERE id=?",
-            vec![json!(v), json!(id)],
-        )
-        .await?;
-        for t in d["task_ids"].as_array().unwrap() {
-            insert(
-                &mut tx,
-                "meeting_tasks",
-                &json!({"meeting_id":id,"task_id":t}),
-            )
-            .await?;
-        }
-        outcome["ref"] = json!({"meetingId":id,"occurrenceKey":key(0)});
+        outcome["ref"] =
+            create_in(&mut tx, text(payload, "projectId")?, &payload["draft"], now).await?;
     } else {
         let r = reference(payload)?;
         let m = recurrence::root(&mut tx, &r.meeting_id).await?;

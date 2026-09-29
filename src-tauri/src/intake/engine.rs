@@ -510,7 +510,9 @@ pub fn parse_suggestions(mut draft: Draft, projects: &[Value], content: &str) ->
     draft.projects.retain(|p| p.created_id.is_some());
     for task in tasks {
         let title = nonblank(text(task, "title")?)?;
-        let source = if let Some(id) = task.get("source_id") {
+        let source = if draft.source_kind == "image" {
+            task["source"].as_str().unwrap_or("").to_owned()
+        } else if let Some(id) = task.get("source_id") {
             let excerpts = transcript_excerpts(&draft.transcript);
             id.as_u64().and_then(|id| usize::try_from(id).ok())
                 .and_then(|id| excerpts.get(id)).map(|s| (*s).to_owned())
@@ -519,7 +521,7 @@ pub fn parse_suggestions(mut draft: Draft, projects: &[Value], content: &str) ->
             // Compatibility with providers that still return the previous quote format.
             nonblank(text(task, "source")?)?
         };
-        if !draft.transcript.contains(&source) {
+        if draft.source_kind != "image" && !draft.transcript.contains(&source) {
             return Err(AppError::validation("AI suggested a task without a matching transcript excerpt. Review the transcript and retry."));
         }
         let mut project_id = task["project_id"]
@@ -598,6 +600,20 @@ pub fn parse_suggestions(mut draft: Draft, projects: &[Value], content: &str) ->
             })
             .collect::<Result<Vec<_>>>()?;
         draft.candidates.push(Candidate {
+            kind: if draft.source_kind == "image" {
+                task["kind"].as_str().unwrap_or("task").into()
+            } else {
+                "task".into()
+            },
+            meeting: if draft.source_kind == "image" && task["kind"] == "meeting" {
+                Some(super::images::meeting_suggestion(
+                    &task["meeting"],
+                    &title,
+                    &draft.time_zone,
+                )?)
+            } else {
+                None
+            },
             id: uid(),
             selected: true,
             project_id,

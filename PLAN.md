@@ -4,6 +4,8 @@ Status: M0 and M1 complete. On September 12, 2026, the user confirmed all M1 man
 
 Voice Inbox is the approved standalone increment requested September 18, 2026. Implementation is in development. The user confirmed recording/transcription; a native provider request saved six unaccepted recommendations. Final visual/review acceptance remains pending. See `docs/Features/Signal/Voice-Inbox-Plan.md` and `docs/verification/voice-inbox.md`. This does not start M5 or complete M8.
 
+AI Inbox image intake was approved as the next standalone increment on September 28, 2026 and is implemented in development. It adds clipboard image paste, file selection/drop, a written prompt, and reviewed task/meeting creation across projects. Voice and Image have separate saved reviews. See `docs/Features/Signal/AI-Inbox-Plan.md` and `docs/verification/ai-inbox.md` for decisions, verification, and remaining manual acceptance. M5–M7 and M8 text-file intake remain separate; the personal installation is unchanged.
+
 ## Sources and scope
 
 - Source of truth: `_design/design_handoff_signal/README.md`, read in full.
@@ -25,7 +27,7 @@ Voice Inbox is the approved standalone increment requested September 18, 2026. I
 - Markdown uses `marked` followed by sanitization. External links open through a narrow native boundary. Attachment operations copy files into application data, with database metadata pointing to the copied file.
 - Pure TypeScript domain functions are independent of Svelte and native APIs. Vitest covers lane packing, carry-over, timer math, and summary generation. No E2E suite.
 - Offline single-user core: no accounts, OAuth, remote title fetching or telemetry. Exception approved for Voice Inbox: optional, explicitly configured AI provider calls and local speech-model downloads. Email uses `mailto:` in M5; SMTP is later work outside M0–M7.
-- M8's screenshot/text interpretation needs a separate processing decision: local models/OCR or an explicitly configured external service. No provider, credentials, cost, network dependency, or change to the offline baseline is approved by this roadmap addition. Ordinary task, meeting, and planner workflows must remain usable without the optional interpreter.
+- Image interpretation uses Signal's existing optional AI connection, with an image-capable model setting and separate image-sharing consent (approved September 28, 2026). Credentials remain native and protected. Text-file intake remains deferred. Ordinary task, meeting, and planner workflows remain usable without the interpreter.
 
 ## Intended folder structure
 
@@ -277,6 +279,8 @@ Execution status: **implementation delivered; partial pending native/manual acce
 
 ### M8 — Assisted meeting and task intake (proposed placement)
 
+The image portion was promoted into the approved standalone AI Inbox increment on September 28, 2026. Its controlling specification is [AI Inbox](docs/Features/Signal/AI-Inbox-Plan.md): one image per review, tasks and meetings together, per-item project assignment, explicitly approved project proposals, existing AI provider, and drafts retained until Finish/Discard. The original scope below continues to describe the broader destination; text-file and general pasted-note intake are not claimed complete.
+
 Feature requested September 13, 2026. Provide a dedicated screen that turns user-supplied screenshots, text files, or pasted notes into editable meeting/task candidates for a selected project. The user can supply instructions such as “Convert these into meeting entries for the Atlas Migration project” or “Build tasks based on these comments for the Website Refresh project.” This is roadmap scope, not an approved implementation specification or an addition to M3.
 
 - **Input:** drop or choose a screenshot or text file, or paste text into a form. Include a project selector, a meeting/task choice, and a free-text instruction field. Resolve an absent or ambiguous project before saving; do not silently create a project from a name in the source.
@@ -327,9 +331,8 @@ These questions identify gaps rather than granting permission to invent behavior
 
 ### Before M8 — assisted intake
 
-- Confirm milestone placement and provide representative screenshots/text for extraction and review acceptance. There is no accepted handoff screen for this new feature; design its screen and review flow at kickoff.
-- Choose local OCR/model processing versus an optional external model service, including installation or configuration, credentials if applicable, expected cost, source-data handling, and behavior when processing is unavailable. Preserve the offline core; do not select or integrate a provider silently.
-- Define supported image/text formats, size limits, multi-file handling, relative-date reference date/timezone, recurrence suggestions, candidate defaults, duplicate matching, and whether candidate/source drafts persist across restart or become record attachments.
+- Image placement, processing, formats/limits, review persistence, duplicate matching, project proposals, and source retention are resolved in [AI Inbox](docs/Features/Signal/AI-Inbox-Plan.md). Complete its remaining native/manual acceptance with representative images.
+- Before the remaining text-file/general pasted-note increment, settle supported text formats and limits, its input/review placement, and representative acceptance fixtures. Preserve the offline core and reviewed creation boundary.
 
 ## Approval boundary
 

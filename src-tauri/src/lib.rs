@@ -41,6 +41,14 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            intake::images::load_image_draft,
+            intake::images::save_image_draft,
+            intake::images::set_intake_image,
+            intake::images::set_intake_image_path,
+            intake::images::get_intake_image,
+            intake::images::suggest_image_items,
+            intake::images::image_recovery,
+            intake::images::set_image_recovery,
             intake::voice_recovery,
             intake::set_voice_recovery,
             intake::voice_settings,

@@ -65,6 +65,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0007_voice_intake.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 8,
+            description: "image_intake",
+            sql: include_str!("../migrations/0008_image_intake.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 #[derive(Serialize)]

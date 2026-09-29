@@ -1,5 +1,6 @@
 mod data;
 mod engine;
+pub mod images;
 mod settings;
 use crate::workspace::models::*;
 pub use engine::Voice;
@@ -107,6 +108,9 @@ pub async fn load_voice_draft(app: AppHandle) -> Result<Option<data::Draft>> {
 }
 #[tauri::command]
 pub async fn save_voice_draft(app: AppHandle, draft: data::Draft) -> Result<data::Draft> {
+    if draft.source_kind != "voice" {
+        return Err(AppError::validation("Invalid voice draft."));
+    }
     data::save(&crate::workspace::pool(&app).await?, draft).await
 }
 #[tauri::command]
@@ -174,3 +178,6 @@ pub fn initialize(app: &AppHandle) -> Result<()> {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod image_tests;

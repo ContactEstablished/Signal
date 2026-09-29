@@ -137,6 +137,7 @@
           bind:value={data.settings.endpoint}
           oninput={() => {
             data!.settings.consent = false;
+            data!.settings.image_consent = false;
           }}
           placeholder="https://your-provider.example/v1"
         /></label
@@ -176,6 +177,9 @@
         to send my transcript and project names to this provider for task
         suggestions. Provider usage charges may apply. Audio stays local.</label
       >
+      <label>Image model ID<input bind:value={data.settings.image_model} placeholder="Use the model above when blank" /></label>
+      <p>Choose a model that supports image input.</p>
+      <label class="consent"><input type="checkbox" bind:checked={data.settings.image_consent} />I agree to send images, prompts, and project names to this provider for task and meeting suggestions. Provider usage charges may apply.</label>
       <button class="primary" onclick={save}>Save settings</button>
     </fieldset>
     {#if busy}<p role="status">

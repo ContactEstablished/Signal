@@ -17,6 +17,10 @@ pub struct Proposal {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Candidate {
+    #[serde(default = "task_kind")]
+    pub kind: String,
+    #[serde(default)]
+    pub meeting: Option<Value>,
     pub id: String,
     pub selected: bool,
     pub project_id: Option<String>,
@@ -35,6 +39,10 @@ pub struct Candidate {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Draft {
+    #[serde(default = "voice_kind")]
+    pub source_kind: String,
+    #[serde(default)]
+    pub image_id: Option<String>,
     pub id: String,
     pub revision: i64,
     pub recorded_at: String,
@@ -43,9 +51,16 @@ pub struct Draft {
     pub projects: Vec<Proposal>,
     pub candidates: Vec<Candidate>,
 }
+fn task_kind() -> String {
+    "task".into()
+}
+fn voice_kind() -> String {
+    "voice".into()
+}
 impl Draft {
     pub fn validate(&self) -> Result<()> {
         nonblank(&self.id)?;
+        choice(&self.source_kind, &["voice", "image"])?;
         if self.revision < 0 {
             return Err(AppError::conflict());
         }
@@ -70,6 +85,16 @@ impl Draft {
         let mut ids = HashSet::new();
         for c in &self.candidates {
             nonblank(&c.id)?;
+            choice(&c.kind, &["task", "meeting"])?;
+            if self.source_kind == "voice" && c.kind != "task" {
+                return Err(AppError::validation("Voice supports tasks only."));
+            }
+            if c.meeting
+                .as_ref()
+                .is_some_and(|m| m.to_string().len() > 40_000)
+            {
+                return Err(AppError::validation("Meeting suggestion is too large."));
+            }
             if !ids.insert(&c.id)
                 || c.title.len() > 500
                 || c.notes.len() > 20_000
@@ -85,9 +110,14 @@ impl Draft {
     }
 }
 pub async fn load(pool: &SqlitePool) -> Result<Option<Draft>> {
-    let payload: Option<String> = sqlx::query_scalar("SELECT payload FROM intake_drafts LIMIT 1")
-        .fetch_optional(pool)
-        .await?;
+    load_source(pool, "voice").await
+}
+pub async fn load_source(pool: &SqlitePool, source: &str) -> Result<Option<Draft>> {
+    let payload: Option<String> =
+        sqlx::query_scalar("SELECT payload FROM intake_drafts WHERE source_kind=? LIMIT 1")
+            .bind(source)
+            .fetch_optional(pool)
+            .await?;
     payload
         .map(|s| {
             serde_json::from_str(&s)
@@ -98,9 +128,11 @@ pub async fn load(pool: &SqlitePool) -> Result<Option<Draft>> {
 pub async fn save(pool: &SqlitePool, mut draft: Draft) -> Result<Draft> {
     draft.validate()?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let old: Option<String> = sqlx::query_scalar("SELECT payload FROM intake_drafts LIMIT 1")
-        .fetch_optional(&mut *tx)
-        .await?;
+    let old: Option<String> =
+        sqlx::query_scalar("SELECT payload FROM intake_drafts WHERE source_kind=? LIMIT 1")
+            .bind(&draft.source_kind)
+            .fetch_optional(&mut *tx)
+            .await?;
     if let Some(old) = old {
         let old: Draft = serde_json::from_str(&old).map_err(|_| AppError::conflict())?;
         if old.id == draft.id && old.revision == draft.revision + 1 {
@@ -113,13 +145,16 @@ pub async fn save(pool: &SqlitePool, mut draft: Draft) -> Result<Draft> {
         if old.id != draft.id || old.revision != draft.revision {
             return Err(AppError::conflict());
         }
+        if old.source_kind != draft.source_kind || old.image_id != draft.image_id {
+            return Err(AppError::conflict());
+        }
         // Accepted IDs are authoritative; editing a draft cannot erase receipts.
         for c in &old.candidates {
             if c.created_id.is_some()
                 && !draft
                     .candidates
                     .iter()
-                    .any(|n| n.id == c.id && n.created_id == c.created_id)
+                    .any(|n| n.id == c.id && json!(n) == json!(c))
             {
                 return Err(AppError::conflict());
             }
@@ -139,7 +174,7 @@ pub async fn save(pool: &SqlitePool, mut draft: Draft) -> Result<Draft> {
                 && !old
                     .candidates
                     .iter()
-                    .any(|n| n.id == c.id && n.created_id == c.created_id)
+                    .any(|n| n.id == c.id && json!(n) == json!(c))
             {
                 return Err(AppError::conflict());
             }
@@ -160,22 +195,48 @@ pub async fn save(pool: &SqlitePool, mut draft: Draft) -> Result<Draft> {
     {
         return Err(AppError::conflict());
     }
+    // A new source draft must never overwrite a different source's ID.
+    let owner: Option<String> =
+        sqlx::query_scalar("SELECT source_kind FROM intake_drafts WHERE id=?")
+            .bind(&draft.id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if owner.is_some_and(|kind| kind != draft.source_kind) {
+        return Err(AppError::conflict());
+    }
+    if draft.source_kind == "image" && draft.image_id.is_some() {
+        let found: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM intake_images WHERE id=? AND draft_id=?")
+                .bind(&draft.image_id)
+                .bind(&draft.id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if found != 1 {
+            return Err(AppError::conflict());
+        }
+    }
     draft.revision += 1;
-    sqlx::query("INSERT INTO intake_drafts(id,revision,payload,updated_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,payload=excluded.payload,updated_at=excluded.updated_at")
-        .bind(&draft.id).bind(draft.revision).bind(json!(draft).to_string()).bind(chrono::Utc::now().to_rfc3339()).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO intake_drafts(id,revision,payload,updated_at,source_kind) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,payload=excluded.payload,updated_at=excluded.updated_at")
+        .bind(&draft.id).bind(draft.revision).bind(json!(draft).to_string()).bind(chrono::Utc::now().to_rfc3339()).bind(&draft.source_kind).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(draft)
 }
 pub async fn discard(pool: &SqlitePool, id: &str, revision: i64) -> Result<()> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let n = sqlx::query("DELETE FROM intake_drafts WHERE id=? AND revision=?")
         .bind(id)
         .bind(revision)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
     if n != 1 {
         return Err(AppError::conflict());
     }
+    sqlx::query("DELETE FROM intake_images WHERE draft_id=?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
     Ok(())
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -285,31 +346,58 @@ pub async fn accept(pool: &SqlitePool, request: Accept, now: &str) -> Result<Val
             .clone()
             .or_else(|| c.proposal_id.as_ref().and_then(|p| mapped.get(p).cloned()))
             .ok_or_else(|| AppError::validation("Choose a project."))?;
-        let existing: Vec<String> =
-            sqlx::query_scalar("SELECT title FROM tasks WHERE project_id=?")
-                .bind(&project_id)
-                .fetch_all(&mut *tx)
-                .await?;
         let normalize = |s: &str| {
             s.split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ")
                 .to_lowercase()
         };
-        if !c.duplicate_ok
-            && existing
-                .iter()
-                .any(|title| normalize(title) == normalize(&c.title))
-        {
-            return Err(AppError::validation(format!(
-                "Possible duplicate: {}. Review and allow duplicates if intentional.",
-                c.title
-            )));
+        if c.kind == "meeting" {
+            let mut meeting = c
+                .meeting
+                .clone()
+                .ok_or_else(|| AppError::validation("Supply meeting details."))?;
+            meeting["title"] = json!(c.title);
+            let meeting = crate::agenda::models::normalize(&meeting, true)?;
+            let at = text(&meeting, "starts_at")?;
+            let start = crate::agenda::models::parse(at)?;
+            let end = crate::agenda::models::utc(start + chrono::Duration::seconds(1));
+            let existing =
+                crate::agenda::occurrences(&mut tx, at, &end, Some(&project_id), false).await?;
+            if !c.duplicate_ok
+                && existing.iter().any(|v| {
+                    v["project_id"] == project_id
+                        && v["starts_at"] == meeting["starts_at"]
+                        && normalize(v["title"].as_str().unwrap_or("")) == normalize(&c.title)
+                })
+            {
+                return Err(AppError::validation(format!(
+                    "Possible duplicate meeting: {}. Allow duplicates if intentional.",
+                    c.title
+                )));
+            }
+            let reference = crate::agenda::create_in(&mut tx, &project_id, &meeting, now).await?;
+            c.created_id = reference["meetingId"].as_str().map(str::to_owned);
+            created.push(json!({"id":c.created_id,"project_id":project_id,"title":c.title,"kind":"meeting","ref":reference}));
+        } else {
+            let existing: Vec<String> =
+                sqlx::query_scalar("SELECT title FROM tasks WHERE project_id=?")
+                    .bind(&project_id)
+                    .fetch_all(&mut *tx)
+                    .await?;
+            if !c.duplicate_ok && existing.iter().any(|t| normalize(t) == normalize(&c.title)) {
+                return Err(AppError::validation(format!(
+                    "Possible duplicate: {}. Allow duplicates if intentional.",
+                    c.title
+                )));
+            }
+            let result = tasks::create_in(&mut tx, json!({"project_id":project_id,"title":c.title,"status":"todo","priority":c.priority,"notes_md":c.notes,"due_at":c.due_at,"estimate_h":c.estimate_h,"external_url":null,"external_provider":null,"external_id":null,"blocked_reason":null,"blocked_on":null,"subtasks":c.subtasks.iter().filter(|s| !s.trim().is_empty()).map(|s| json!({"title":s,"done":false})).collect::<Vec<_>>(),"tags":[],"alerts":[1440,60],"attachments":[]}), now).await?;
+            c.created_id = result["task"]["id"].as_str().map(str::to_owned);
+            created.push(
+                json!({"id":c.created_id,"project_id":project_id,"title":c.title,"kind":"task"}),
+            );
         }
-        let result = tasks::create_in(&mut tx, json!({"project_id":project_id,"title":c.title,"status":"todo","priority":c.priority,"notes_md":c.notes,"due_at":c.due_at,"estimate_h":c.estimate_h,"external_url":null,"external_provider":null,"external_id":null,"blocked_reason":null,"blocked_on":null,"subtasks":c.subtasks.iter().filter(|s| !s.trim().is_empty()).map(|s| json!({"title":s,"done":false})).collect::<Vec<_>>(),"tags":[],"alerts":[1440,60],"attachments":[]}), now).await?;
-        c.created_id = result["task"]["id"].as_str().map(str::to_owned);
         c.selected = false;
-        created.push(result);
     }
     draft.revision += 1;
     sqlx::query("UPDATE intake_drafts SET payload=?,revision=?,updated_at=? WHERE id=?")
@@ -319,7 +407,7 @@ pub async fn accept(pool: &SqlitePool, request: Accept, now: &str) -> Result<Val
         .bind(&draft.id)
         .execute(&mut *tx)
         .await?;
-    let receipt = json!({"created":created.iter().map(|v| json!({"id":v["task"]["id"],"project_id":v["task"]["project_id"],"title":v["task"]["title"]})).collect::<Vec<_>>(),"projects":created_projects.iter().map(|p| json!({"id":p["id"],"name":p["name"]})).collect::<Vec<_>>()});
+    let receipt = json!({"created":created,"projects":created_projects.iter().map(|p| json!({"id":p["id"],"name":p["name"]})).collect::<Vec<_>>()});
     sqlx::query("INSERT INTO intake_receipts VALUES(?,?,?,?)")
         .bind(&request.request_id)
         .bind(fingerprint)

@@ -11,6 +11,8 @@ pub struct Settings {
     pub whisper_model: String,
     pub microphone: String,
     pub consent: bool,
+    pub image_consent: bool,
+    pub image_model: String,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -20,6 +22,8 @@ impl Default for Settings {
             whisper_model: "base.en".into(),
             microphone: String::new(),
             consent: false,
+            image_consent: false,
+            image_model: String::new(),
         }
     }
 }
@@ -69,8 +73,12 @@ pub async fn save(app: &AppHandle, mut settings: Settings, key: Option<String>) 
         endpoint(&settings.endpoint)?;
     }
     settings.model = settings.model.trim().to_owned();
+    settings.image_model = settings.image_model.trim().to_owned();
     choice(&settings.whisper_model, &["base.en", "small.en"])?;
-    if settings.model.len() > 200 || settings.microphone.len() > 500 {
+    if settings.image_model.len() > 200
+        || settings.model.len() > 200
+        || settings.microphone.len() > 500
+    {
         return Err(AppError::validation("Voice settings are too long."));
     }
     if let Some(key) = key {

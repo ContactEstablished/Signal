@@ -1,7 +1,10 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { Mic, Square, X, Check, Plus, ArrowRight } from 'lucide-svelte';
-  import * as api from '../voice/api';
+  import * as voiceApi from '../voice/api';
+  import * as imageApi from '../voice/image-api';
+  import MeetingCandidate from '../components/voice/MeetingCandidate.svelte';
+  import type { MeetingRef } from '../domain/agenda';
   import { record, type Recording } from '../voice/capture';
   import {
     errorMessage,
@@ -9,22 +12,31 @@
     type CloseReason,
   } from '../domain/types';
   import type { Workspace } from '../state/app.svelte';
+  import { meetingIssue } from '../voice/review';
   import { dueFields, resolveTaskDate } from '../domain/agenda-calendar';
   let {
     workspace,
+    mode = 'voice',
+    onOpenMeeting = () => {},
     onOpenTask,
     onSettings,
     onGuard,
   }: {
     workspace: Workspace;
+    mode?: 'voice' | 'image';
+    onOpenMeeting?: (ref: MeetingRef) => unknown;
     onOpenTask: (id: string) => unknown;
     onSettings: () => unknown;
     onGuard: (active: boolean) => void;
   } = $props();
-  let draft = $state<api.Draft | null>(null),
+  const isImage = untrack(() => mode === 'image');
+  const api = isImage ? { ...voiceApi, ...imageApi } : voiceApi;
+  let imageUrl = $state(''), zoom = $state(false);
+  let fileInput = $state<HTMLInputElement>();
+  let draft = $state<voiceApi.Draft | null>(null),
     ready = $state(false),
     phase = $state<
-      'idle' | 'recording' | 'transcribing' | 'suggesting' | 'accepting'
+      'idle' | 'uploading' | 'recording' | 'transcribing' | 'suggesting' | 'accepting'
     >('idle'),
     error = $state(''),
     notice = $state(''),
@@ -33,15 +45,16 @@
     suggestionSeconds = $state(0),
     unsaved = $state(false),
     saving = $state(false),
-    pending = $state<api.Acceptance | null>(null),
-    created = $state<api.Receipt | null>(null);
+    pending = $state<voiceApi.Acceptance | null>(null),
+    created = $state<voiceApi.Receipt | null>(null);
   let recording: Recording | null = null,
     disposed = false,
     generation = 0,
     edits = 0,
     saveChain = Promise.resolve(),
     timer: ReturnType<typeof setTimeout> | undefined;
-  let pendingSave: api.Draft | null = null;
+  let unlistenDrop: (() => void) | undefined;
+  let pendingSave: voiceApi.Draft | null = null;
   let dateErrors = $state<string[]>([]);
   let confirmation = $state(''),
     answer: ((v: boolean) => void) | null = null;
@@ -56,10 +69,10 @@
     return () => clearInterval(interval);
   });
   const grouped = $derived.by(() => {
-    const groups = new Map<string, api.Candidate[]>();
+    const groups = new Map<string, voiceApi.Candidate[]>();
     for (const c of draft?.candidates ?? []) {
       const name = c.created_id
-        ? 'Created tasks'
+        ? 'Created items'
         : (workspace.projects.find((p) => p.id === c.project_id)?.name ??
           draft?.projects.find((p) => p.id === c.proposal_id)?.name ??
           'Choose a project');
@@ -93,11 +106,18 @@
     };
   }
   onMount(() => {
+    if (isImage) void imageApi.subscribeDrop(paths => {
+      if (workspace.editor || busy || pending || !ready) return;
+      if (paths.length !== 1) { error = 'Choose one image per review.'; return; }
+      void replaceImage(paths[0]);
+    }).then(fn => disposed ? fn() : unlistenDrop = fn).catch(e => error = errorMessage(e));
     void (async () => {
       try {
         draft = await api.load();
         pending = await api.recovery();
-        workspace.voiceRecovery = !!pending;
+        if (isImage) workspace.imageRecovery = !!pending;
+        else workspace.voiceRecovery = !!pending;
+        if (isImage && draft?.image_id) imageUrl = await imageApi.image(draft.image_id);
         ready = true;
       } catch (e) {
         error = errorMessage(e);
@@ -106,6 +126,7 @@
   });
   onDestroy(() => {
     disposed = true;
+    unlistenDrop?.();
     generation++;
     clearTimeout(timer);
     if (recording) void recording.cancel();
@@ -155,17 +176,18 @@
   }
   export async function requestClose(_reason: CloseReason): Promise<boolean> {
     if (dateErrors.length) {
-      error = 'Correct the invalid deadline before leaving.';
+      error = 'Correct the invalid date before leaving.';
       return false;
     }
     if (pending) {
       error = 'Resolve the pending task creation using Retry before leaving.';
       return false;
     }
+    if (saving || phase === 'uploading') return false;
     if (busy) {
       if (
         !(await ask(
-          'Stop this voice operation and leave? Your saved review will remain.',
+          'Stop this operation and leave? Your saved review will remain.',
         ))
       )
         return false;
@@ -277,7 +299,7 @@
       confirm &&
       draft.candidates.some((c) => !c.created_id) &&
       !(await ask(
-        'Regenerate recommendations? Unaccepted task edits will be replaced.',
+        'Regenerate recommendations? Uncreated suggestion edits will be replaced.',
       ))
     )
       return;
@@ -294,8 +316,8 @@
       changed();
       await persist();
       notice = result.candidates.length
-        ? 'Review every project and task before creating.'
-        : 'No tasks found. Edit the transcript or add a task manually.';
+        ? 'Review every project and suggestion before creating.'
+        : 'No suggestions found. Edit your instructions or add an item manually.';
     } catch (e) {
       if (epoch === generation) error = errorMessage(e);
     } finally {
@@ -318,16 +340,18 @@
       };
     }
     phase = 'accepting';
-    workspace.voiceRecovery = true;
+    if (isImage) workspace.imageRecovery = true;
+    else workspace.voiceRecovery = true;
     try {
       await api.setRecovery($state.snapshot(pending));
-      created = await workspace.acceptVoice($state.snapshot(pending));
+      created = await (isImage ? workspace.acceptImage($state.snapshot(pending)) : workspace.acceptVoice($state.snapshot(pending)));
       await api.setRecovery(null);
       pending = null;
-      workspace.voiceRecovery = false;
+      if (isImage) workspace.imageRecovery = false;
+      else workspace.voiceRecovery = false;
       draft = await api.load();
       notice =
-        'Selected tasks created in To Do. Unselected tasks remain in this review.';
+        'Selected items created. Unselected suggestions remain in this review.';
     } catch (e) {
       error = errorMessage(e);
       if (
@@ -341,7 +365,8 @@
         try {
           await api.setRecovery(null);
           pending = null;
-          workspace.voiceRecovery = false;
+          if (isImage) workspace.imageRecovery = false;
+      else workspace.voiceRecovery = false;
         } catch {
           error += ' Could not clear recovery; retry before leaving.';
         }
@@ -356,7 +381,7 @@
       busy ||
       pending ||
       !(await ask(
-        'Discard this transcript and unaccepted suggestions? Created tasks will remain.',
+        'Discard this source and unaccepted suggestions? Created items will remain.',
       ))
     )
       return;
@@ -365,14 +390,15 @@
     try {
       await api.discard($state.snapshot(draft));
       draft = null;
+      imageUrl = '';
       created = null;
       dateErrors = [];
-      notice = 'Review cleared. Created tasks remain in their projects.';
+      notice = 'Review cleared. Created items remain in their projects.';
     } catch (e) {
       error = errorMessage(e);
     }
   }
-  function assign(c: api.Candidate, v: string) {
+  function assign(c: voiceApi.Candidate, v: string) {
     c.project_id = v.startsWith('project:') ? v.slice(8) : null;
     c.proposal_id = v.startsWith('new:') ? v.slice(4) : null;
     c.duplicate_ok = false;
@@ -398,7 +424,7 @@
     });
     changed();
   }
-  function deadline(c: api.Candidate, value: string) {
+  function deadline(c: voiceApi.Candidate, value: string) {
     try {
       c.due_at = value
         ? resolveTaskDate(
@@ -413,15 +439,60 @@
       error = errorMessage(e);
     }
   }
+
+  function pasteImage(e: ClipboardEvent) {
+    if (!isImage || workspace.editor || !e.clipboardData?.files.length) return;
+    e.preventDefault();
+    void upload(e.clipboardData.files);
+  }
+  async function upload(files: FileList | null) {
+    if (!files?.length || busy || pending || !ready) return;
+    if (files.length !== 1) { error = 'Choose one image per review.'; return; }
+    const file = files[0];
+    if (file.size > 10 * 1024 * 1024) { error = 'Choose an image up to 10 MiB.'; return; }
+    phase = 'uploading';
+    try {
+      const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+      phase = 'idle';
+      if (!disposed) await replaceImage(bytes);
+    } catch (e) { error = errorMessage(e); phase = 'idle'; }
+  }
+  async function replaceImage(bytes: number[] | string | null) {
+    if (busy || pending || disposed) return;
+    if (draft?.candidates.some(c => !c.created_id) && !(await ask('Replace the source and clear uncreated suggestions? Created items remain.'))) return;
+    if (!draft) { draft = imageApi.newDraft(workspace.nowUtc, workspace.timeZone); changed(); }
+    await persist();
+    if (unsaved || !draft) return;
+    phase = 'uploading'; error = '';
+    try {
+      draft = typeof bytes === 'string' ? await imageApi.setImagePath($state.snapshot(draft), bytes) : await imageApi.setImage($state.snapshot(draft), bytes);
+      imageUrl = draft.image_id ? await imageApi.image(draft.image_id) : '';
+      dateErrors = [];
+    } catch (e) {
+      error = errorMessage(e);
+      // A dropped bridge reply may follow a successful source replacement.
+      // Reconcile before allowing another revisioned operation.
+      try { draft = await imageApi.load(); imageUrl = draft?.image_id ? await imageApi.image(draft.image_id) : ''; }
+      catch { ready = false; error += ' Reopen AI Inbox to recover the saved review.'; }
+    } finally { phase = 'idle'; }
+  }
+  function addMeeting() {
+    addTask();
+    const c = draft!.candidates[draft!.candidates.length - 1];
+    c.kind = 'meeting';
+    c.meeting = { title:'', starts_at:'', start_local:'', start_offset:'', time_zone:draft!.time_zone, duration_min:0, link_url:null, agenda_md:'', notes_md:'', reminder_min:15, show_in_day:true, task_ids:[], repeat_rule:'none', repeat_weekdays:[], repeat_until:null, fold_policy:'earlier' };
+    changed();
+  }
+
 </script>
 
+<svelte:window onpaste={pasteImage} ondragover={e => { if (isImage && e.dataTransfer?.types.includes('Files')) e.preventDefault(); }} ondrop={e => { if (isImage && e.dataTransfer?.files.length) { e.preventDefault(); void upload(e.dataTransfer.files); } }} />
 <main class="voice-page">
   <div class="heading">
     <div>
-      <h1>Voice Inbox</h1>
+      <h1>{isImage ? 'Image intake' : 'Voice intake'}</h1>
       <p>
-        Dictate your projects and tasks. Review first; create only what you
-        choose.
+        {isImage ? 'Paste an image and describe what you need. Review tasks and meetings before creating.' : 'Dictate your projects and tasks. Review first; create only what you choose.'}
       </p>
     </div>
     <button class="outline" onclick={onSettings}>Voice & AI settings</button>
@@ -429,6 +500,17 @@
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if !ready}<p>Loading saved review…</p>{:else}
+    {#if isImage}
+      <section class="capture">
+        <input class="file-input" bind:this={fileInput} type="file" accept="image/png,image/jpeg,image/webp" aria-label="Choose image" onchange={e => { void upload(e.currentTarget.files); e.currentTarget.value = ''; }} />
+        <button class="primary" disabled={busy || !!pending} onclick={() => fileInput?.click()}>{draft?.image_id ? 'Replace image' : 'Choose image'}</button>
+        {#if draft?.image_id}<button class="outline" disabled={busy || !!pending} onclick={() => replaceImage(null)}>Remove image</button>{/if}
+        <span>Or paste with Ctrl+V or drop an image here. PNG, JPEG, WebP · up to 10 MiB / 25 megapixels.</span>
+        {#if busy}<span role="status">{phase === 'suggesting' ? `Analyzing image… ${suggestionSeconds}s elapsed (up to 90 seconds).` : phase === 'uploading' ? 'Saving image…' : 'Creating selected items…'}</span>
+          {#if phase === 'suggesting'}<button class="outline" onclick={cancel}>Cancel analysis</button>{/if}
+        {/if}
+      </section>
+    {:else}
     <section class="capture">
       {#if phase === 'recording'}<button class="primary" onclick={stop}
           ><Square />Stop & analyze</button
@@ -466,23 +548,26 @@
         to your configured AI provider.</small
       >
     </section>
+    {/if}
     {#if pending}<section class="recovery">
-        <strong>Task creation needs confirmation.</strong>
+        <strong>Item creation needs confirmation.</strong>
         <p>
-          Retry checks the original request; it will not create the same tasks
+          Retry checks the original request; it will not create the same items
           twice.
         </p>
         <button class="primary" disabled={busy} onclick={accept}
-          >Retry task creation</button
+          >{isImage ? 'Retry item creation' : 'Retry task creation'}</button
         >
       </section>{/if}
     {#if draft}
       <div class="review">
         <section class="source">
-          <h2>Transcript</h2>
+          <h2>{isImage ? 'Image and instructions' : 'Transcript'}</h2>
+          {#if isImage && imageUrl}<button class="image-preview" aria-label="Enlarge source image" onclick={() => zoom = true}><img src={imageUrl} alt="Source for task and meeting suggestions" /></button>{/if}
+          {#if isImage}<p>Try “Add these meetings to Atlas” or “Break this into tasks across my projects.”</p>{/if}
           <textarea
-            aria-label="Transcript"
-            rows="16"
+            aria-label={isImage ? 'Instructions' : 'Transcript'}
+            rows={isImage ? 5 : 16}
             bind:value={draft.transcript}
             oninput={changed}
             disabled={busy || !!pending}></textarea>
@@ -493,8 +578,8 @@
           </p>
           <button
             class="outline"
-            disabled={busy || !!pending || !draft.transcript.trim()}
-            onclick={() => analyze()}>{phase === 'suggesting' ? 'Suggesting tasks…' : 'Suggest tasks'}</button
+            disabled={busy || !!pending || !draft.transcript.trim() || (isImage && !draft.image_id)}
+            onclick={() => analyze()}>{phase === 'suggesting' ? 'Analyzing…' : isImage ? 'Analyze image' : 'Suggest tasks'}</button
           >
           <p aria-live="polite">
             {saving
@@ -508,7 +593,7 @@
             >{/if}
         </section>
         <section class="suggestions">
-          <h2>Task recommendations</h2>
+          <h2>{isImage ? 'Suggested tasks and meetings' : 'Task recommendations'}</h2>
           <fieldset disabled={busy || !!pending}>
             {#each draft.projects as p (p.id)}<section
                 class="proposed"
@@ -536,7 +621,7 @@
                       type="checkbox"
                       bind:checked={p.approved}
                       onchange={changed}
-                    />Approve creating this project when accepting its tasks</label
+                    />Approve creating this project when accepting its items</label
                   >{/if}
               </section>{/each}
             <div class="actions">
@@ -556,7 +641,7 @@
                 }}>Select none</button
               ><button class="outline" onclick={addTask}
                 ><Plus />Add task</button
-              ><button
+              >{#if isImage}<button class="outline" onclick={addMeeting}>Add meeting</button>{/if}<button
                 class="outline"
                 onclick={() => {
                   draft!.projects.push({
@@ -578,8 +663,8 @@
                   {#if c.created_id}<strong><Check />Created: {c.title}</strong
                     ><button
                       class="outline"
-                      onclick={() => onOpenTask(c.created_id!)}
-                      >Open task <ArrowRight /></button
+                      onclick={() => c.kind === 'meeting' ? onOpenMeeting({meetingId:c.created_id!, occurrenceKey:'o:0'}) : onOpenTask(c.created_id!)}
+                      >Open {c.kind === 'meeting' ? 'meeting' : 'task'} <ArrowRight /></button
                     >
                   {:else}
                     <label class="inline"
@@ -587,7 +672,7 @@
                         type="checkbox"
                         bind:checked={c.selected}
                         onchange={changed}
-                      /><strong>Include task · To Do</strong></label
+                      /><strong>Include {c.kind === 'meeting' ? 'meeting' : 'task · To Do'}</strong></label
                     >
                     <label
                       >Project<select
@@ -618,6 +703,9 @@
                         maxlength="500"
                       /></label
                     >
+                    {#if c.kind === 'meeting' && c.meeting}
+                      <MeetingCandidate bind:meeting={c.meeting} onChange={() => {c.duplicate_ok = false; changed();}} />
+                    {:else}
                     <label
                       >Notes<textarea
                         bind:value={c.notes}
@@ -667,6 +755,7 @@
                         /></label
                       >
                     </div>
+                    {/if}
                     {#if c.source}<blockquote>
                         {c.source}
                       </blockquote>{/if}{#if c.warning}<p class="warning">
@@ -677,14 +766,14 @@
                         type="checkbox"
                         bind:checked={c.duplicate_ok}
                         onchange={changed}
-                      />Allow an identical title in this project if intentional</label
+                      />Allow a duplicate {c.kind === 'meeting' ? 'title and start time' : 'title'} in this project if intentional</label
                     >
                   {/if}
                 </article>
               {/each}{/each}
             {#if !draft.candidates.length}<p>
                 Recommendations will appear here. You can also add and edit
-                tasks manually.
+                {isImage ? 'tasks and meetings' : 'tasks'} manually.
               </p>{/if}
             <div class="actions footer">
               <button
@@ -692,7 +781,7 @@
                 disabled={!selected.length ||
                   unsaved ||
                   saving ||
-                  !!dateErrors.length}
+                  !!dateErrors.length || selected.some(c => !!meetingIssue(c))}
                 onclick={accept}
                 ><Check />Create selected ({selected.length})</button
               ><button class="outline" onclick={discard}
@@ -707,14 +796,15 @@
       </div>
     {/if}
     {#if created}<p role="status">
-        Created {created.created.length} tasks in To Do.
+        Created {created.created.length} items. Tasks are in To Do; meetings appear in Signal’s calendar.
       </p>{/if}
   {/if}
+  {#if zoom && imageUrl}<dialog class="zoom" use:modal oncancel={() => zoom = false} aria-label="Source image"><button class="outline" onclick={() => zoom = false}>Close image</button><img src={imageUrl} alt="Source at full size" /></dialog>{/if}
   {#if confirmation}<dialog
       class="confirm"
       use:modal
       oncancel={() => decide(false)}
-      aria-label="Confirm voice action"
+      aria-label="Confirm intake action"
     >
       <p>{confirmation}</p>
       <div class="actions">
@@ -727,6 +817,13 @@
 </main>
 
 <style>
+  .file-input { display: none; }
+  .image-preview { display: block; width: 100%; padding: 0; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); }
+  .image-preview img { width: 100%; max-height: 420px; object-fit: contain; }
+  .zoom { max-width: 95vw; max-height: 90vh; overflow: auto; background: var(--surface); color: var(--text); }
+  .zoom img { display: block; max-width: none; }
+  .zoom button { position: sticky; top: 0; }
+
   .voice-page {
     padding: 24px;
     overflow: auto;
