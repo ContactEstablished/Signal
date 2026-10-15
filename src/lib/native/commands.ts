@@ -83,6 +83,8 @@ export const stageAttachments = (
   paths?: string[],
 ): Promise<StagedAttachment[]> =>
   invoke('stage_attachments', { paths: paths ?? null });
+export const stageImageAttachment = (bytes?: number[]): Promise<StagedAttachment[]> =>
+  invoke('stage_image_attachment', { bytes: bytes ?? null });
 export const discardStagedAttachments = (
   tokens: string[],
 ): Promise<CleanupResult> => invoke('discard_staged_attachments', { tokens });

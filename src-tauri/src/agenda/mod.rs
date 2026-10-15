@@ -411,7 +411,7 @@ async fn validate_change(conn: &mut SqliteConnection, change: &Value) -> Result<
         }
         choice(
             text(record, "attendance")?,
-            &["unmarked", "attended", "missed"],
+            &["unmarked", "attended", "missed", "canceled"],
         )?;
         text(record, "occurrence_notes_md")?;
     }
@@ -440,7 +440,10 @@ async fn validate_change(conn: &mut SqliteConnection, change: &Value) -> Result<
             .await?
             .ok_or_else(AppError::missing)?;
         if action == "record" {
-            choice(text(p, "attendance")?, &["unmarked", "attended", "missed"])?;
+            choice(
+                text(p, "attendance")?,
+                &["unmarked", "attended", "missed", "canceled"],
+            )?;
             text(p, "occurrence_notes_md")?;
         }
         if action == "remove" {
@@ -614,6 +617,19 @@ pub async fn create_in(
     Ok(json!({"meetingId":id,"occurrenceKey":key(0)}))
 }
 
+async fn save_record(
+    conn: &mut SqliteConnection,
+    meeting: &Value,
+    ordinal: i64,
+    record: &Value,
+) -> Result<()> {
+    let attendance = text(record, "attendance")?;
+    let canceled = attendance == "canceled";
+    execute(conn, "UPDATE meeting_occurrences SET attendance=?,marked_cancelled=?,occurrence_notes_md=? WHERE meeting_id=? AND ordinal=?",
+        vec![json!(if canceled { "unmarked" } else { attendance }), json!(if canceled { 1 } else { 0 }), record["occurrence_notes_md"].clone(), meeting["id"].clone(), json!(ordinal)]).await?;
+    Ok(())
+}
+
 pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result<Value> {
     if input.request_id.trim().is_empty() {
         return Err(AppError::validation("Missing request identity."));
@@ -716,7 +732,7 @@ pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result
             "edit_occurrence" => save_snapshot(&mut tx, &m, n, &payload["draft"], now).await?,
             "record" => {
                 save_snapshot(&mut tx, &m, n, &old, now).await?;
-                execute(&mut tx,"UPDATE meeting_occurrences SET attendance=?,occurrence_notes_md=? WHERE meeting_id=? AND ordinal=?",vec![payload["attendance"].clone(),payload["occurrence_notes_md"].clone(),m["id"].clone(),json!(n)]).await?;
+                save_record(&mut tx, &m, n, payload).await?;
             }
             "edit_following" => {
                 let past = protected(&mut tx, &m, n, now).await?;
@@ -806,9 +822,7 @@ pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result
         // The main Save meeting action commits the schedule and this occurrence's
         // attendance/notes in the same transaction and under one replay identity.
         if let Some(record) = payload.get("occurrence") {
-            execute(&mut tx,
-                "UPDATE meeting_occurrences SET attendance=?,occurrence_notes_md=? WHERE meeting_id=? AND ordinal=?",
-                vec![record["attendance"].clone(), record["occurrence_notes_md"].clone(), m["id"].clone(), json!(n)]).await?;
+            save_record(&mut tx, &m, n, record).await?;
         }
         execute(
             &mut tx,

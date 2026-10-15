@@ -6,7 +6,7 @@ import { meetingIssue } from '../../src/lib/voice/review';
 import { meetingStart } from '../../src/lib/domain/agenda-calendar';
 import type { Draft, Candidate } from '../../src/lib/voice/api';
 import type { Workspace } from '../../src/lib/state/app.svelte';
-const api = vi.hoisted(() => ({load:vi.fn(),save:vi.fn(),recovery:vi.fn(),setRecovery:vi.fn(),suggest:vi.fn(),cancel:vi.fn(),discard:vi.fn(),image:vi.fn(),setImage:vi.fn(),setImagePath:vi.fn(),subscribeDrop:vi.fn(),newDraft:vi.fn()}));
+const api = vi.hoisted(() => ({load:vi.fn(),save:vi.fn(),recovery:vi.fn(),setRecovery:vi.fn(),suggest:vi.fn(),cancel:vi.fn(),discard:vi.fn(),image:vi.fn(),setImage:vi.fn(),setImagePath:vi.fn(),clipboardImage:vi.fn(),subscribeDrop:vi.fn(),newDraft:vi.fn()}));
 vi.mock('../../src/lib/voice/image-api',()=>api);
 let instance: ReturnType<typeof mount> | undefined;
 let draft: Draft;
@@ -24,6 +24,13 @@ beforeEach(()=>{
   api.recovery.mockResolvedValue(null);
   api.subscribeDrop.mockResolvedValue(()=>{});
   api.cancel.mockResolvedValue(undefined);
+  api.clipboardImage.mockResolvedValue([1,2,3]);
+  api.newDraft.mockImplementation((now,zone)=>({id:'image',source_kind:'image',image_id:null,revision:0,recorded_at:now,time_zone:zone,transcript:'',projects:[],candidates:[]}));
+  api.setImage.mockImplementation(async(d,bytes)=>{
+    draft={...structuredClone(d),revision:d.revision+1,image_id:bytes ? 'replacement' : null,candidates:d.candidates.filter((c:Candidate)=>c.created_id)};
+    return structuredClone(draft);
+  });
+  api.suggest.mockImplementation(async()=>structuredClone(draft));
 });
 afterEach(async()=>{ if(instance) await unmount(instance); instance=undefined; document.body.innerHTML=''; vi.useRealTimers(); });
 async function setup(){
@@ -34,7 +41,7 @@ async function setup(){
   })};
   const props={workspace:workspace as unknown as Workspace,mode:'image' as const,onOpenTask:vi.fn(),onOpenMeeting:vi.fn(),onSettings:vi.fn(),onGuard:vi.fn()};
   instance=mount(VoiceInbox,{target:document.body,props});
-  await vi.waitFor(()=>expect(button('Analyze image')).toBeTruthy());
+  await vi.waitFor(()=>expect(button('Paste image')).toBeTruthy());
   return {...props,workspace};
 }
 it('restores the image and blocks incomplete selected meetings while allowing selected tasks',async()=>{
@@ -73,6 +80,23 @@ it('restores the exact image acceptance identity without touching voice recovery
   await vi.waitFor(()=>expect(api.setRecovery).toHaveBeenLastCalledWith(null));
   expect(p.workspace.imageRecovery).toBe(false);
 });
+it('keeps the source, instructions and suggestions after an output limit without retrying automatically',async()=>{
+  const p=await setup();
+  const message="Image analysis reached the model's output limit before finishing. Your image and instructions are saved. Retry analysis, or crop the image to fewer items.";
+  api.suggest.mockRejectedValue({code:'OutputLimit',message});
+  const field=document.querySelector<HTMLTextAreaElement>('[aria-label=Instructions]')!;
+  field.value='Only propose new meetings';field.dispatchEvent(new Event('input',{bubbles:true}));flushSync();
+  button('Analyze image').click();await vi.waitFor(()=>expect(button('Continue')).toBeTruthy());button('Continue').click();
+  await vi.waitFor(()=>expect(document.querySelector('[role=alert]')?.textContent).toBe(message));
+  expect(field.value).toBe('Only propose new meetings');
+  expect(draft.transcript).toBe('Only propose new meetings');
+  expect(draft.image_id).toBe('source');
+  expect(document.querySelector('img')?.getAttribute('src')).toContain('data:image/png');
+  expect(document.querySelectorAll('article')).toHaveLength(2);
+  expect(api.suggest).toHaveBeenCalledOnce();
+  expect(p.workspace.acceptImage).not.toHaveBeenCalled();
+  expect(button('Analyze image').disabled).toBe(false);
+});
 it('accepts exactly one pasted image and reconciles source replacement before review',async()=>{
   draft.candidates=[];
   await setup();
@@ -83,6 +107,123 @@ it('accepts exactly one pasted image and reconciles source replacement before re
   await vi.waitFor(()=>expect(api.setImage).toHaveBeenCalledWith(expect.objectContaining({id:'image'}),[1,2,3]));
   expect(event.defaultPrevented).toBe(true);
   await vi.waitFor(()=>expect(api.image).toHaveBeenLastCalledWith('replacement'));
+});
+it('pastes a native clipboard image into an empty inbox and analyzes without instructions',async()=>{
+  api.load.mockResolvedValueOnce(null);
+  const p=await setup();
+  const readyMeeting=meeting();
+  readyMeeting.project_id=null;
+  Object.assign(readyMeeting.meeting!,meetingStart({date:'2026-09-29',time:'10:00',offset:''},draft.time_zone),{duration_min:45});
+  api.suggest.mockImplementation(async(d)=>({...d,candidates:[readyMeeting]}));
+  button('Paste image').click();
+  await vi.waitFor(()=>expect(api.suggest).toHaveBeenCalledWith(expect.objectContaining({image_id:'replacement',transcript:''})));
+  await vi.waitFor(()=>expect(document.body.textContent).toContain('Which project is this meeting for?'));
+  expect(button('Create selected (1)').disabled).toBe(true);
+  expect(draft.candidates[0].meeting?.duration_min).toBe(45);
+  expect(draft.candidates[0].meeting?.starts_at).toBe('2026-09-29T14:00:00.000Z');
+  const project=document.querySelector<HTMLSelectElement>('article select')!;
+  project.value='project:p';project.dispatchEvent(new Event('change',{bubbles:true}));flushSync();
+  await vi.waitFor(()=>expect(button('Create selected (1)').disabled).toBe(false));
+  button('Create selected (1)').click();
+  await vi.waitFor(()=>expect(p.workspace.acceptImage).toHaveBeenCalledOnce());
+  expect(api.clipboardImage).toHaveBeenCalledOnce();
+  expect(api.suggest).toHaveBeenCalledOnce();
+  expect(draft.candidates[0].meeting?.duration_min).toBe(45);
+});
+it('uses native Ctrl+V outside text fields once and ignores repeated gestures during import',async()=>{
+  draft.candidates=[];
+  await setup();
+  let resolve!: (bytes:number[])=>void;
+  api.clipboardImage.mockImplementation(()=>new Promise<number[]>(r=>resolve=r));
+  const event=new KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true,cancelable:true});
+  document.body.dispatchEvent(event);
+  document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'v',ctrlKey:true,repeat:true,bubbles:true,cancelable:true}));
+  window.dispatchEvent(new Event('paste',{cancelable:true}));
+  expect(event.defaultPrevented).toBe(true);
+  expect(api.clipboardImage).toHaveBeenCalledOnce();
+  resolve([1,2,3]);
+  await vi.waitFor(()=>expect(api.setImage).toHaveBeenCalledOnce());
+  await vi.waitFor(()=>expect(api.suggest).toHaveBeenCalledOnce());
+});
+it('accepts clipboard items when the browser file list is empty, including in instructions',async()=>{
+  draft.candidates=[];
+  await setup();
+  const event=new Event('paste',{cancelable:true,bubbles:true});
+  Object.defineProperty(event,'clipboardData',{value:{files:[],items:[{kind:'file',type:'image/png',getAsFile:()=>({size:3,arrayBuffer:async()=>new Uint8Array([4,5,6]).buffer})}]}});
+  document.querySelector('textarea')!.dispatchEvent(event);
+  await vi.waitFor(()=>expect(api.setImage).toHaveBeenCalledWith(expect.objectContaining({id:'image'}),[4,5,6]));
+  expect(event.defaultPrevented).toBe(true);
+  expect(api.clipboardImage).not.toHaveBeenCalled();
+});
+it('preserves ordinary text paste and does not read clipboard contents for text shortcuts',async()=>{
+  await setup();
+  const field=document.querySelector('textarea')!;
+  const key=new KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true,cancelable:true});
+  field.dispatchEvent(key);
+  const paste=new Event('paste',{bubbles:true,cancelable:true});
+  Object.defineProperty(paste,'clipboardData',{value:{files:[],items:[],types:['text/plain']}});
+  field.dispatchEvent(paste);
+  expect(key.defaultPrevented).toBe(false);
+  expect(paste.defaultPrevented).toBe(false);
+  expect(api.clipboardImage).not.toHaveBeenCalled();
+  expect(api.setImage).not.toHaveBeenCalled();
+});
+it('retains edited instructions and the current review when the clipboard has no image',async()=>{
+  await setup();
+  api.clipboardImage.mockRejectedValue(new Error('Copy an image or screenshot, then try again.'));
+  const field=document.querySelector<HTMLTextAreaElement>('[aria-label=Instructions]')!;
+  field.value='Keep this unsaved instruction';field.dispatchEvent(new Event('input'));flushSync();
+  button('Paste image').click();
+  await vi.waitFor(()=>expect(document.body.textContent).toContain('Copy an image or screenshot'));
+  expect(field.value).toBe('Keep this unsaved instruction');
+  expect(document.querySelectorAll('article')).toHaveLength(2);
+  expect(api.load).toHaveBeenCalledOnce();
+  expect(api.setImage).not.toHaveBeenCalled();
+  expect(api.suggest).not.toHaveBeenCalled();
+});
+it('keeps existing suggestions when replacement is declined and suppresses a second paste',async()=>{
+  await setup();
+  button('Paste image').click();
+  await vi.waitFor(()=>expect(button('Keep editing')).toBeTruthy());
+  document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true,cancelable:true}));
+  button('Keep editing').click();
+  await vi.waitFor(()=>expect(button('Paste image').disabled).toBe(false));
+  expect(api.clipboardImage).toHaveBeenCalledOnce();
+  expect(api.setImage).not.toHaveBeenCalled();
+  expect(api.suggest).not.toHaveBeenCalled();
+  expect(document.querySelectorAll('article')).toHaveLength(2);
+});
+it('blocks clipboard import while recovering item creation',async()=>{
+  api.recovery.mockResolvedValue({request_id:'original',draft_id:'image',revision:1,candidate_ids:['task']});
+  await setup();
+  expect(button('Paste image').disabled).toBe(true);
+  document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true,cancelable:true}));
+  expect(api.clipboardImage).not.toHaveBeenCalled();
+});
+it('rejects multiple images and oversized files before reading or replacing the source',async()=>{
+  draft.candidates=[];
+  await setup();
+  const read=vi.fn();
+  for(const files of [[{size:3,arrayBuffer:read},{size:3,arrayBuffer:read}],[{size:10*1024*1024+1,arrayBuffer:read}]]){
+    const event=new Event('paste',{cancelable:true});
+    Object.defineProperty(event,'clipboardData',{value:{files}});window.dispatchEvent(event);flushSync();
+  }
+  expect(document.body.textContent).toContain('Choose an image up to 10 MiB.');
+  expect(read).not.toHaveBeenCalled();
+  expect(api.setImage).not.toHaveBeenCalled();
+});
+it('reconciles an uncertain source write without analyzing or overwriting the recovered review',async()=>{
+  draft.candidates=[];
+  await setup();
+  api.setImage.mockImplementation(async(d)=>{
+    draft={...d,revision:d.revision+1,image_id:'saved-before-lost-reply'};
+    throw new Error('Bridge reply lost');
+  });
+  button('Paste image').click();
+  await vi.waitFor(()=>expect(api.image).toHaveBeenLastCalledWith('saved-before-lost-reply'));
+  expect(api.load).toHaveBeenCalledTimes(2);
+  expect(api.suggest).not.toHaveBeenCalled();
+  expect(button('Analyze image').disabled).toBe(false);
 });
 it('requires a deliberate DST offset and valid recurrence before meeting acceptance',()=>{
   const c=meeting(); const m=c.meeting!;

@@ -3,7 +3,7 @@
   import WeekStrip from '../components/agenda/WeekStrip.svelte';
   import AgendaTaskCard from '../components/agenda/AgendaTaskCard.svelte';
   import MeetingPill from '../components/agenda/MeetingPill.svelte';
-  import type { TodaySnapshot, MeetingRef } from '../domain/agenda';
+  import type { TodaySnapshot, MeetingRef, MeetingOccurrence, Attendance } from '../domain/agenda';
   let {
     snapshot,
     nowUtc,
@@ -14,6 +14,7 @@
     onRetry,
     onOpenTask,
     onOpenMeeting,
+    onRecordMeeting,
     onPlanTask,
     onJoin,
     onNewMeeting,
@@ -28,6 +29,7 @@
     onRetry: () => unknown;
     onOpenTask: (id: string) => unknown;
     onOpenMeeting: (r: MeetingRef) => unknown;
+    onRecordMeeting?: (meeting: MeetingOccurrence, attendance: Attendance) => Promise<void>;
     onPlanTask: (id: string) => unknown;
     onJoin: (url: string) => unknown;
     onNewMeeting: () => unknown;
@@ -36,6 +38,7 @@
   const next = $derived(
     snapshot?.meetings.find(
       (m) =>
+        m.attendance !== 'canceled' && m.attendance !== 'attended' &&
         Date.parse(m.starts_at) + m.duration_min * 60000 > Date.parse(nowUtc),
     )?.id,
   );
@@ -115,6 +118,8 @@
                   meeting.duration_min * 60000 <=
                   Date.parse(nowUtc)}
                 onOpen={onOpenMeeting}
+                {onRecordMeeting}
+                {pending}
                 {onJoin}
               />{:else}<p>No meetings today.</p>{/each}
           </div>

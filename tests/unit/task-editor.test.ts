@@ -163,6 +163,10 @@ it('keeps estimate validation independent from changing the due date', () => {
 function detailForm(
   onPatch: ReturnType<typeof vi.fn>,
   time?: TimerUiBindings,
+  attachments?: {
+    onStageImage: (bytes?: number[]) => Promise<import('../../src/lib/domain/types').StagedAttachment[]>;
+    onAttach: (id: string, tokens: string[]) => Promise<TaskDetail>;
+  },
 ) {
   const d: TaskDetail = {
     task: {
@@ -215,11 +219,42 @@ function detailForm(
       onDeleteEntity: async () => ({ cleanupPending: false }),
       onDeleted: () => {},
       onClose: () => {},
+      ...attachments,
     },
   });
   flushSync();
   return { d, editor: component as ReturnType<typeof TaskDetailDialog> };
 }
+it('pastes an image from a focused field and attaches it immediately, preserving ordinary text paste', async () => {
+  const staged = [{ token: 'image-token', filename: 'Pasted image.png', size: 3, mime: 'image/png' }];
+  const onStageImage = vi.fn().mockResolvedValue(staged);
+  const onAttach = vi.fn().mockResolvedValue({});
+  const { editor } = detailForm(vi.fn(), undefined, { onStageImage, onAttach });
+  const field = document.querySelector<HTMLInputElement>('.title')!;
+  const image = new File(['png'], 'image.png', { type: 'image/png' });
+  Object.defineProperty(image, 'arrayBuffer', { value: async () => new Uint8Array([1, 2, 3]).buffer });
+  const paste = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, 'clipboardData', { value: { files: [image], types: ['Files'] } });
+  field.dispatchEvent(paste);
+  expect(paste.defaultPrevented).toBe(true);
+  await vi.waitFor(() => expect(onAttach).toHaveBeenCalledWith('task', ['image-token']));
+  expect(onStageImage).toHaveBeenCalledWith([1, 2, 3]);
+  expect(await editor.requestClose('dialog')).toBe(true);
+  const text = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(text, 'clipboardData', { value: { files: [], types: ['text/plain'] } });
+  field.dispatchEvent(text);
+  expect(text.defaultPrevented).toBe(false);
+  expect(onStageImage).toHaveBeenCalledTimes(1);
+});
+it('uses native clipboard image paste outside fields and shows save failures', async () => {
+  const onStageImage = vi.fn().mockRejectedValue(new Error('Image write failed'));
+  detailForm(vi.fn(), undefined, { onStageImage, onAttach: vi.fn() });
+  const paste = new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true, cancelable: true });
+  document.querySelector('dialog')!.dispatchEvent(paste);
+  expect(paste.defaultPrevented).toBe(true);
+  await vi.waitFor(() => expect(document.body.textContent).toContain('Image write failed'));
+  expect(onStageImage).toHaveBeenCalledWith(undefined);
+});
 it('waits for a pending field write on native close and commits Enter/blur only once', async () => {
   let resolve!: (value: TaskDetail) => void;
   const onPatch = vi.fn(

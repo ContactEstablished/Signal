@@ -153,6 +153,9 @@ pub fn floor(q: &PlannerQuery, now: &str) -> Result<i64> {
     Ok((ms + 899999) / 900000 * 15)
 }
 pub fn meeting_range(m: &Value, q: &PlannerQuery) -> Result<Option<(i64, i64)>> {
+    if m["attendance"] == "canceled" {
+        return Ok(None);
+    }
     let (start, end) = bounds(q)?;
     let (_, zone) = calendar(q)?;
     let from = instant_in_zone(text(m, "starts_at")?, zone)?;

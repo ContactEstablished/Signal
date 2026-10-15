@@ -1,6 +1,9 @@
 use super::*;
 const NOW: &str = "2025-09-11T17:42:00.000Z";
 async fn db() -> (tempfile::TempDir, SqlitePool, String) {
+    db_at(i64::MAX).await
+}
+async fn db_at(version: i64) -> (tempfile::TempDir, SqlitePool, String) {
     let dir = tempfile::tempdir().unwrap();
     let p = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(2)
@@ -12,7 +15,10 @@ async fn db() -> (tempfile::TempDir, SqlitePool, String) {
         )
         .await
         .unwrap();
-    for m in crate::db::migrations() {
+    for m in crate::db::migrations()
+        .into_iter()
+        .filter(|m| m.version <= version)
+    {
         sqlx::raw_sql(m.sql).execute(&p).await.unwrap();
     }
     sqlx::query("INSERT INTO projects(id,name,color,sort_order) VALUES('p','Agenda','cyan',0)")
@@ -35,6 +41,160 @@ fn occurrence_draft(mut d: Value) -> Value {
         d.as_object_mut().unwrap().remove(key);
     }
     d
+}
+
+#[tokio::test]
+async fn marked_cancellation_stays_visible_preserves_notes_and_only_changes_one_occurrence() {
+    let (dir, p, pid) = db().await;
+    let created = apply(
+        &p,
+        "outcome-create",
+        "create",
+        json!({"projectId":pid,"draft":draft()}),
+    )
+    .await
+    .unwrap();
+    let r = created["outcome"]["ref"].clone();
+    let next = json!({"meetingId":r["meetingId"],"occurrenceKey":"o:1"});
+    apply(&p, "outcome-attend", "record", json!({"ref":r,"expectedRevision":0,"attendance":"attended","occurrence_notes_md":"Keep these notes"})).await.unwrap();
+    let payload = json!({"ref":r,"expectedRevision":1,"attendance":"canceled","occurrence_notes_md":"Keep these notes"});
+    let marked = apply(&p, "outcome-cancel", "record", payload.clone())
+        .await
+        .unwrap();
+    let o = &marked["detail"]["occurrence"];
+    assert_eq!(o["attendance"], "canceled");
+    assert_eq!(o["occurrence_notes_md"], "Keep these notes");
+    assert_eq!(o["starts_at"], draft()["starts_at"]);
+    assert_eq!(o["duration_min"], draft()["duration_min"]);
+    assert_eq!(marked["outcome"]["removed"], false);
+    let replayed = apply(&p, "outcome-cancel", "record", payload)
+        .await
+        .unwrap();
+    assert_eq!(replayed["replayed"], true);
+    assert_eq!(replayed["detail"]["occurrence"]["revision"], 2);
+    assert!(apply(&p, "outcome-stale", "record", json!({"ref":r,"expectedRevision":1,"attendance":"attended","occurrence_notes_md":"Wrong notes"})).await.is_err());
+    let mut tx = p.begin().await.unwrap();
+    let q = AgendaQuery {
+        date: "2025-09-12".into(),
+        time_zone: "America/New_York".into(),
+        project_id: Some(pid),
+    };
+    let week = snapshot(&mut tx, &q, NOW, true).await.unwrap();
+    assert_eq!(week["days"][4]["meetings"][0]["attendance"], "canceled");
+    let next_detail = meeting_detail(&mut tx, &serde_json::from_value(next).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(next_detail["occurrence"]["attendance"], "unmarked");
+    assert_eq!(next_detail["occurrence"]["occurrence_notes_md"], "");
+    let planner_query = crate::planner::models::PlannerQuery {
+        date: "2025-09-12".into(),
+        time_zone: "America/New_York".into(),
+    };
+    let planner = crate::planner::snapshot(&mut tx, &planner_query, NOW, 0)
+        .await
+        .unwrap();
+    assert_eq!(planner["meetings"][0]["attendance"], "canceled");
+    assert!(
+        crate::planner::models::meeting_range(&planner["meetings"][0], &planner_query)
+            .unwrap()
+            .is_none()
+    );
+    let stored = one(&mut tx, "SELECT attendance,marked_cancelled,cancelled FROM meeting_occurrences WHERE meeting_id=? AND ordinal=0", vec![r["meetingId"].clone()]).await.unwrap();
+    assert_eq!(stored["marked_cancelled"], 1);
+    assert_eq!(stored["cancelled"], 0);
+    assert_eq!(stored["attendance"], "unmarked");
+    drop(tx);
+    p.close().await;
+    let reopened = sqlx::sqlite::SqlitePoolOptions::new()
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(dir.path().join("agenda.db"))
+                .foreign_keys(true),
+        )
+        .await
+        .unwrap();
+    let mut conn = reopened.acquire().await.unwrap();
+    let persisted = meeting_detail(&mut conn, &serde_json::from_value(r.clone()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(persisted["occurrence"]["attendance"], "canceled");
+    assert_eq!(
+        persisted["occurrence"]["occurrence_notes_md"],
+        "Keep these notes"
+    );
+    drop(conn);
+    let mut changed = occurrence_draft(draft());
+    changed["title"] = json!("Updated canceled meeting");
+    let edited = apply(&reopened, "outcome-edit", "edit_occurrence", json!({"ref":r,"expectedRevision":2,"draft":changed,"occurrence":{"attendance":"canceled","occurrence_notes_md":"Keep these notes"}})).await.unwrap();
+    assert_eq!(edited["detail"]["occurrence"]["attendance"], "canceled");
+    assert_eq!(
+        edited["detail"]["occurrence"]["title"],
+        "Updated canceled meeting"
+    );
+    let restored = apply(&reopened, "outcome-restore", "record", json!({"ref":r,"expectedRevision":3,"attendance":"unmarked","occurrence_notes_md":"Keep these notes"})).await.unwrap();
+    assert_eq!(restored["detail"]["occurrence"]["attendance"], "unmarked");
+    let attended = apply(&reopened, "outcome-reattend", "record", json!({"ref":r,"expectedRevision":4,"attendance":"attended","occurrence_notes_md":"Keep these notes"})).await.unwrap();
+    assert_eq!(attended["detail"]["occurrence"]["attendance"], "attended");
+    assert_eq!(
+        attended["detail"]["occurrence"]["occurrence_notes_md"],
+        "Keep these notes"
+    );
+}
+
+#[tokio::test]
+async fn outcome_migration_preserves_existing_attendance_and_notes() {
+    let (dir, p, pid) = db_at(8).await;
+    let created = apply(
+        &p,
+        "legacy-outcome-create",
+        "create",
+        json!({"projectId":pid,"draft":draft()}),
+    )
+    .await
+    .unwrap();
+    let r = created["outcome"]["ref"].clone();
+    sqlx::query("INSERT INTO meeting_occurrences(meeting_id,occurrence_key,ordinal,attendance,occurrence_notes_md,updated_at) VALUES(?,'o:0',0,'attended','Existing history',?)")
+        .bind(r["meetingId"].as_str().unwrap()).bind(NOW).execute(&p).await.unwrap();
+    let migration = crate::db::migrations()
+        .into_iter()
+        .find(|m| m.version == 9)
+        .unwrap();
+    let mut tx = p.begin().await.unwrap();
+    sqlx::raw_sql(migration.sql)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    p.close().await;
+    let p = sqlx::sqlite::SqlitePoolOptions::new()
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(dir.path().join("agenda.db"))
+                .foreign_keys(true),
+        )
+        .await
+        .unwrap();
+    let mut tx = p.begin().await.unwrap();
+    let detail = meeting_detail(&mut tx, &serde_json::from_value(r).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(detail["occurrence"]["attendance"], "attended");
+    assert_eq!(
+        detail["occurrence"]["occurrence_notes_md"],
+        "Existing history"
+    );
+    assert_eq!(detail["occurrence"]["starts_at"], draft()["starts_at"]);
+    assert_eq!(
+        one(
+            &mut tx,
+            "SELECT marked_cancelled FROM meeting_occurrences",
+            vec![]
+        )
+        .await
+        .unwrap()["marked_cancelled"],
+        0
+    );
+    tx.commit().await.unwrap();
 }
 
 #[tokio::test]

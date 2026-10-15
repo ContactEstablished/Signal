@@ -341,9 +341,11 @@ export class Workspace {
       commands.setTaskAlerts(id, offsets, this.revision(id)),
     );
   }
-  async stage(paths?: string[]) {
+  async stage(paths?: string[], image?: { bytes?: number[] }) {
     const editor = this.editor;
-    const files = await commands.stageAttachments(paths);
+    const files = image
+      ? await commands.stageImageAttachment(image.bytes)
+      : await commands.stageAttachments(paths);
     if (this.editor !== editor) {
       await commands.discardStagedAttachments(files.map((f) => f.token));
       return [];

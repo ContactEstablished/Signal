@@ -7,6 +7,8 @@
     WeekSnapshot,
     AgendaTask,
     MeetingRef,
+    MeetingOccurrence,
+    Attendance,
     DueDestination,
   } from '../domain/agenda';
   import { addDays } from '../domain/agenda-calendar';
@@ -20,6 +22,7 @@
     onRetry,
     onOpenTask,
     onOpenMeeting,
+    onRecordMeeting,
     onNewMeeting,
     onNavigateWeek,
     onMoveDue,
@@ -32,6 +35,7 @@
     onRetry: () => unknown;
     onOpenTask: (id: string) => unknown;
     onOpenMeeting: (r: MeetingRef) => unknown;
+    onRecordMeeting?: (meeting: MeetingOccurrence, attendance: Attendance) => Promise<void>;
     onNewMeeting: () => unknown;
     onNavigateWeek: (d: string) => unknown;
     onMoveDue: (
@@ -255,6 +259,8 @@
                 displayDate={day.date}
                 {timeZone}
                 onOpen={onOpenMeeting}
+                {onRecordMeeting}
+                pending={busy || pending}
               />{/each}{#each day.tasks as task (task.id)}<AgendaTaskCard
                 {task}
                 compact

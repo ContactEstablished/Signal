@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
-  import { Mic, Square, X, Check, Plus, ArrowRight } from 'lucide-svelte';
+  import { Mic, Square, X, Check, Plus, ArrowRight, ClipboardPaste } from 'lucide-svelte';
   import * as voiceApi from '../voice/api';
   import * as imageApi from '../voice/image-api';
   import MeetingCandidate from '../components/voice/MeetingCandidate.svelte';
@@ -440,41 +440,76 @@
     }
   }
 
-  function pasteImage(e: ClipboardEvent) {
-    if (!isImage || workspace.editor || !e.clipboardData?.files.length) return;
-    e.preventDefault();
-    void upload(e.clipboardData.files);
+  function canImportImage() {
+    return isImage && ready && !disposed && !busy && !pending && !workspace.editor && !confirmation && !zoom
+      && !document.querySelector('dialog[open]');
   }
-  async function upload(files: FileList | null) {
-    if (!files?.length || busy || pending || !ready) return;
+  function isTextInput(target: EventTarget | null) {
+    return target instanceof Element && !!target.closest('input, textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]');
+  }
+  function pasteShortcut(e: KeyboardEvent) {
+    if (e.defaultPrevented || e.repeat || e.altKey || e.shiftKey || !(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'v'
+      || !canImportImage() || isTextInput(e.target)) return;
+    // A non-editable WebView target may not emit a paste event for native bitmaps.
+    // Prevent the browser's paste so this gesture imports the image exactly once.
+    e.preventDefault();
+    void replaceImage(imageApi.clipboardImage);
+  }
+  function pasteImage(e: ClipboardEvent) {
+    if (e.defaultPrevented || !canImportImage()) return;
+    const clipboard = e.clipboardData;
+    if (!clipboard) return;
+    const files = Array.from(clipboard.files ?? []);
+    if (!files.length) {
+      for (const item of Array.from(clipboard.items ?? [])) {
+        if (item.kind !== 'file') continue;
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (files.length) {
+      e.preventDefault();
+      void upload(files);
+    } else if (!Array.from(clipboard.types ?? []).some(type => type.startsWith('text/'))) {
+      e.preventDefault();
+      void replaceImage(imageApi.clipboardImage);
+    }
+  }
+  async function upload(files: FileList | File[] | null) {
+    if (!files?.length || !canImportImage()) return;
     if (files.length !== 1) { error = 'Choose one image per review.'; return; }
     const file = files[0];
     if (file.size > 10 * 1024 * 1024) { error = 'Choose an image up to 10 MiB.'; return; }
-    phase = 'uploading';
-    try {
-      const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-      phase = 'idle';
-      if (!disposed) await replaceImage(bytes);
-    } catch (e) { error = errorMessage(e); phase = 'idle'; }
+    await replaceImage(async () => Array.from(new Uint8Array(await file.arrayBuffer())));
   }
-  async function replaceImage(bytes: number[] | string | null) {
-    if (busy || pending || disposed) return;
-    if (draft?.candidates.some(c => !c.created_id) && !(await ask('Replace the source and clear uncreated suggestions? Created items remain.'))) return;
-    if (!draft) { draft = imageApi.newDraft(workspace.nowUtc, workspace.timeZone); changed(); }
-    await persist();
-    if (unsaved || !draft) return;
+  async function replaceImage(source: number[] | string | null | (() => Promise<number[]>)) {
+    if (!canImportImage()) return;
     phase = 'uploading'; error = '';
+    let replacing = false;
+    let analyzeSource = false;
     try {
+      const bytes = typeof source === 'function' ? await source() : source;
+      if (disposed) return;
+      if (draft?.candidates.some(c => !c.created_id) && !(await ask('Replace the source and clear uncreated suggestions? Created items remain.'))) return;
+      if (disposed) return;
+      if (!draft) { draft = imageApi.newDraft(workspace.nowUtc, workspace.timeZone); changed(); }
+      await persist();
+      if (unsaved || !draft || disposed) return;
+      replacing = true;
       draft = typeof bytes === 'string' ? await imageApi.setImagePath($state.snapshot(draft), bytes) : await imageApi.setImage($state.snapshot(draft), bytes);
       imageUrl = draft.image_id ? await imageApi.image(draft.image_id) : '';
       dateErrors = [];
+      analyzeSource = bytes !== null;
     } catch (e) {
       error = errorMessage(e);
       // A dropped bridge reply may follow a successful source replacement.
       // Reconcile before allowing another revisioned operation.
-      try { draft = await imageApi.load(); imageUrl = draft?.image_id ? await imageApi.image(draft.image_id) : ''; }
-      catch { ready = false; error += ' Reopen AI Inbox to recover the saved review.'; }
+      if (replacing) {
+        try { draft = await imageApi.load(); imageUrl = draft?.image_id ? await imageApi.image(draft.image_id) : ''; }
+        catch { ready = false; error += ' Reopen AI Inbox to recover the saved review.'; }
+      }
     } finally { phase = 'idle'; }
+    if (analyzeSource && !disposed) await analyze(false);
   }
   function addMeeting() {
     addTask();
@@ -486,13 +521,13 @@
 
 </script>
 
-<svelte:window onpaste={pasteImage} ondragover={e => { if (isImage && e.dataTransfer?.types.includes('Files')) e.preventDefault(); }} ondrop={e => { if (isImage && e.dataTransfer?.files.length) { e.preventDefault(); void upload(e.dataTransfer.files); } }} />
+<svelte:window onkeydown={pasteShortcut} onpaste={pasteImage} ondragover={e => { if (isImage && e.dataTransfer?.types.includes('Files')) e.preventDefault(); }} ondrop={e => { if (isImage && e.dataTransfer?.files.length) { e.preventDefault(); void upload(e.dataTransfer.files); } }} />
 <main class="voice-page">
   <div class="heading">
     <div>
       <h1>{isImage ? 'Image intake' : 'Voice intake'}</h1>
       <p>
-        {isImage ? 'Paste an image and describe what you need. Review tasks and meetings before creating.' : 'Dictate your projects and tasks. Review first; create only what you choose.'}
+        {isImage ? 'Paste an image to identify meetings and tasks automatically. Choose a project if needed, then review and create.' : 'Dictate your projects and tasks. Review first; create only what you choose.'}
       </p>
     </div>
     <button class="outline" onclick={onSettings}>Voice & AI settings</button>
@@ -503,9 +538,10 @@
     {#if isImage}
       <section class="capture">
         <input class="file-input" bind:this={fileInput} type="file" accept="image/png,image/jpeg,image/webp" aria-label="Choose image" onchange={e => { void upload(e.currentTarget.files); e.currentTarget.value = ''; }} />
-        <button class="primary" disabled={busy || !!pending} onclick={() => fileInput?.click()}>{draft?.image_id ? 'Replace image' : 'Choose image'}</button>
+        <button class="primary" disabled={busy || !!pending} onclick={() => replaceImage(imageApi.clipboardImage)}><ClipboardPaste />Paste image</button>
+        <button class="outline" disabled={busy || !!pending} onclick={() => fileInput?.click()}>{draft?.image_id ? 'Replace image' : 'Choose image'}</button>
         {#if draft?.image_id}<button class="outline" disabled={busy || !!pending} onclick={() => replaceImage(null)}>Remove image</button>{/if}
-        <span>Or paste with Ctrl+V or drop an image here. PNG, JPEG, WebP · up to 10 MiB / 25 megapixels.</span>
+        <span>Copy an image or screenshot, then paste with Ctrl+V or Paste image. You can also choose or drop a file. PNG, JPEG, WebP · up to 10 MiB / 25 megapixels.</span>
         {#if busy}<span role="status">{phase === 'suggesting' ? `Analyzing image… ${suggestionSeconds}s elapsed (up to 90 seconds).` : phase === 'uploading' ? 'Saving image…' : 'Creating selected items…'}</span>
           {#if phase === 'suggesting'}<button class="outline" onclick={cancel}>Cancel analysis</button>{/if}
         {/if}
@@ -564,9 +600,10 @@
         <section class="source">
           <h2>{isImage ? 'Image and instructions' : 'Transcript'}</h2>
           {#if isImage && imageUrl}<button class="image-preview" aria-label="Enlarge source image" onclick={() => zoom = true}><img src={imageUrl} alt="Source for task and meeting suggestions" /></button>{/if}
-          {#if isImage}<p>Try “Add these meetings to Atlas” or “Break this into tasks across my projects.”</p>{/if}
+          {#if isImage}<p>Instructions are optional. Meetings, times, and other visible details are filled in automatically. Add guidance here if needed, then analyze again.</p>{/if}
           <textarea
             aria-label={isImage ? 'Instructions' : 'Transcript'}
+            placeholder={isImage ? 'Optional: assign these meetings to Atlas, or focus on a specific part of the image…' : undefined}
             rows={isImage ? 5 : 16}
             bind:value={draft.transcript}
             oninput={changed}
@@ -578,7 +615,7 @@
           </p>
           <button
             class="outline"
-            disabled={busy || !!pending || !draft.transcript.trim() || (isImage && !draft.image_id)}
+            disabled={busy || !!pending || (isImage ? !draft.image_id : !draft.transcript.trim())}
             onclick={() => analyze()}>{phase === 'suggesting' ? 'Analyzing…' : isImage ? 'Analyze image' : 'Suggest tasks'}</button
           >
           <p aria-live="polite">
@@ -674,6 +711,7 @@
                         onchange={changed}
                       /><strong>Include {c.kind === 'meeting' ? 'meeting' : 'task · To Do'}</strong></label
                     >
+                    {#if isImage && !c.project_id && !c.proposal_id}<p class="warning">Which project is this {c.kind === 'meeting' ? 'meeting' : 'task'} for?</p>{/if}
                     <label
                       >Project<select
                         value={c.project_id
@@ -781,7 +819,7 @@
                 disabled={!selected.length ||
                   unsaved ||
                   saving ||
-                  !!dateErrors.length || selected.some(c => !!meetingIssue(c))}
+                  !!dateErrors.length || selected.some(c => !!meetingIssue(c) || (isImage && !c.project_id && !c.proposal_id))}
                 onclick={accept}
                 ><Check />Create selected ({selected.length})</button
               ><button class="outline" onclick={discard}

@@ -8,7 +8,9 @@
     PlannerSnapshot,
     BatchMode,
     BlockKind,
+    PlannerMeeting,
   } from '../domain/planner';
+  import type { Attendance } from '../domain/agenda';
   import type { TimerAction } from '../domain/timers';
   import { SIDEBAR_BLOCK_MINUTES } from '../domain/planner-drag';
   import {
@@ -31,6 +33,7 @@
     onOpenTask,
     onNewTask,
     onOpenMeeting,
+    onRecordMeeting,
     onJoin,
     onSummary,
   }: {
@@ -40,6 +43,7 @@
     onOpenMeeting?: (
       ref: import('../domain/agenda').MeetingRef,
     ) => Promise<void>;
+    onRecordMeeting?: (meeting: PlannerMeeting, attendance: Attendance) => Promise<void>;
     onJoin: (url: string) => Promise<void>;
     onSummary: () => void;
   } = $props();
@@ -48,10 +52,10 @@
       planner.snapshot?.date === planner.date ? planner.snapshot : null,
     );
   const pending = $derived(
-    planner.pending || Object.values(workspace.timers.pending).some(Boolean),
+    planner.pending || workspace.agenda.pending || Object.values(workspace.timers.pending).some(Boolean),
   );
   let quickBusy = $state(false);
-  const locked = $derived(pending || planner.recovery || quickBusy);
+  const locked = $derived(pending || planner.recovery || workspace.agenda.recovery || quickBusy);
   const items = $derived(
     snapshot
       ? plannerItems(
@@ -550,6 +554,7 @@
         onTimer={timer}
         {onJoin}
         {onOpenMeeting}
+        {onRecordMeeting}
         onEditTime={editTime}
       /><PlannerSidebar
         {snapshot}

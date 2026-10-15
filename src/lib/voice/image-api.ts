@@ -6,6 +6,7 @@ export const load = () => invoke<Draft | null>('load_image_draft');
 export const save = (draft: Draft) => invoke<Draft>('save_image_draft', { draft });
 export const setImage = (draft: Draft, bytes: number[] | null) =>
   invoke<Draft>('set_intake_image', { id: draft.id, revision: draft.revision, bytes });
+export const clipboardImage = () => invoke<number[]>('read_intake_clipboard_image');
 export const image = (id: string) => invoke<string>('get_intake_image', { id });
 export const setImagePath = (draft: Draft, path: string) => invoke<Draft>('set_intake_image_path', { id: draft.id, revision: draft.revision, path });
 export const subscribeDrop = (receive: (paths: string[]) => void) => getCurrentWebview().onDragDropEvent(event => {

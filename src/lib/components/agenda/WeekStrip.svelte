@@ -28,9 +28,10 @@
           title={t.title}
           onclick={() => onOpenTask(t.id)}>{t.title}</button
         >{/each}{#each day.meetings as m}<button
+          class:canceled={m.attendance === 'canceled'}
           data-color={m.project_color}
-          title={`${m.title} · ${m.project_name}`}
-          onclick={() => onOpenMeeting(m.ref)}>○ {m.title}</button
+          title={`${m.title} · ${m.project_name}${m.attendance === 'unmarked' ? '' : ' · ' + m.attendance}`}
+          onclick={() => onOpenMeeting(m.ref)}>{m.attendance === 'attended' ? '✓' : '○'} {m.title}</button
         >{/each}{#if !day.tasks.length && !day.meetings.length}<span
           class="muted">Nothing due</span
         >{/if}
@@ -78,6 +79,7 @@
     text-decoration: line-through;
     opacity: var(--opacity-done-card);
   }
+  .canceled { text-decoration: line-through; color: var(--text-muted); background: var(--surface-2); }
   .muted {
     font-size: var(--text-meta);
   }

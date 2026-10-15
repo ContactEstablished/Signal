@@ -17,6 +17,30 @@ async fn database() -> SqlitePool {
     pool
 }
 #[tokio::test]
+async fn pasted_image_is_validated_saved_and_preserved_after_adoption() {
+    let temp = tempfile::tempdir().unwrap();
+    let files = Files::new(temp.path().join("managed")).unwrap();
+    let pool = database().await;
+    let now = now(true);
+    assert!(files.stage_image(&pool, b"invalid image", &now).await.is_err());
+    assert!(rows(&mut *pool.acquire().await.unwrap(), "SELECT * FROM attachment_file_ops", vec![]).await.unwrap().is_empty());
+    let bytes = crate::intake::images::clipboard_png(&[255, 0, 0, 255], 1, 1).unwrap();
+    let staged = files.stage_image(&pool, &bytes, &now).await.unwrap();
+    assert_eq!(staged[0]["mime"], "image/png");
+    assert_eq!(staged[0]["size"], bytes.len());
+    let project = projects::save(&pool, None, ProjectInput { name: "Images".into(), color: "cyan".into() }).await.unwrap();
+    let reply = tasks::create(&pool, json!({"project_id": project["id"], "title": "Clipboard", "status": "todo", "priority": "medium", "attachments": [staged[0]["token"]]}), &now).await.unwrap();
+    let attachment = &reply["attachments"][0];
+    let copy = files.path(attachment["path"].as_str().unwrap()).unwrap();
+    files.recover(&pool, &now).await.unwrap();
+    assert_eq!(fs::read(copy).unwrap(), bytes);
+    // Unattached image drafts use the same durable discard and cleanup path.
+    let draft = files.stage_image(&pool, &bytes, &now).await.unwrap();
+    let token = draft[0]["token"].as_str().unwrap().to_string();
+    assert!(!files.discard(&pool, &[token.clone()], &now).await.unwrap());
+    assert!(!files.root.join(format!("{token}.png")).exists());
+}
+#[tokio::test]
 async fn stage_failure_compensates_and_recovery_preserves_sources() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("managed");

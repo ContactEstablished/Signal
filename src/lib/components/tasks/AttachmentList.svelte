@@ -67,7 +67,7 @@
         onclick={onRetry}>Retry adding files</button
       >{/if}
   </div>
-  <small>Local copies · drop files anywhere in this dialog</small>
+  <small>Local copies · drop files or paste an image anywhere in this dialog</small>
 </section>
 
 <style>

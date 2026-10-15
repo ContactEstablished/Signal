@@ -410,7 +410,7 @@
                 >Attendance<select bind:value={attendance}
                   ><option value="unmarked">Unmarked</option><option
                     value="attended">Attended</option
-                  ><option value="missed">Missed</option></select
+                  ><option value="missed">Missed</option><option value="canceled">Canceled</option></select
                 ></label
               ><label
                 >Occurrence notes<textarea rows="3" bind:value={notes}

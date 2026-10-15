@@ -10,6 +10,7 @@
   import TaskTags from './TaskTags.svelte';
   import TaskTimeCard, { type TimerUiBindings } from './TaskTimeCard.svelte';
   import AttachmentList from './AttachmentList.svelte';
+  import { pasteAttachments, imageBytes } from '../../native/attachments';
   import { applyPastedLink } from '../../domain/links';
   import {
     errorMessage,
@@ -40,6 +41,7 @@
     onTags,
     onAlerts,
     onStage,
+    onStageImage,
     onDiscardStaged,
     onAttach,
     onRemoveAttachment,
@@ -66,6 +68,7 @@
     onTags: (id: string, inputs: TagInput[]) => Promise<TaskDetail>;
     onAlerts: (id: string, offsets: number[]) => Promise<TaskDetail>;
     onStage: (paths?: string[]) => Promise<StagedAttachment[]>;
+    onStageImage?: (bytes?: number[]) => Promise<StagedAttachment[]>;
     onDiscardStaged: (tokens: string[]) => Promise<CleanupResult>;
     onAttach: (id: string, tokens: string[]) => Promise<TaskDetail>;
     onRemoveAttachment: (id: string) => Promise<AttachmentRemoval>;
@@ -289,6 +292,12 @@
       ),
     );
   }
+  async function pasteImage(image?: File) {
+    await run(async () => {
+      const files = await onStageImage!(await imageBytes(image));
+      if (files.length) await onAttach(detail.task.id, files.map((file) => file.token));
+    });
+  }
   async function discardTokens(tokens: string[]) {
     const result = await run(() => onDiscardStaged(tokens));
     if (result?.cleanupPending)
@@ -446,6 +455,7 @@
 </script>
 
 <dialog
+  use:pasteAttachments={{ enabled: () => !!onStageImage && !pending && !confirm && !deleteMode, stage: (image) => void pasteImage(image) }}
   use:backdrop
   class="m1-dialog detail"
   class:drop-target={dropping}

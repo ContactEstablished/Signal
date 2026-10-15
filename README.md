@@ -17,6 +17,8 @@ For future personal updates, keep the personal identifier unchanged. Close the i
 
 ## Development
 
+Your Day meeting bars now offer **Attended** and **Canceled** actions on hover or keyboard focus. A canceled occurrence stays visible with a gray, struck-through title; clicking its selected action restores it. Personal version **0.1.6**, installed October 6, 2026, includes these controls. See [meeting outcome verification](docs/verification/meeting-outcomes.md) and [installation record](docs/verification/personal-install-0.1.6.md).
+
 Meeting time controls and selectable weekly weekdays have development-only improvements pending an explicit live-update request. See [behavior, compatibility, and verification](docs/verification/meeting-time-weekdays.md). The personal installation remains on its existing build.
 
 Use Node 22.14+, pnpm 10.33.2, Rust stable MSVC, Visual Studio's Desktop development with C++ workload, Windows SDK, and WebView2.
@@ -61,3 +63,9 @@ Open the header **Voice Inbox** button. In **Settings → Voice & AI**, download
 Start recording → Stop & analyze → review transcript and project-grouped suggestions → approve any proposed projects → edit/select tasks → Create selected. Accepted tasks enter **To Do**. Open task uses the existing editor. Finish review or Discard draft clears the saved transcript/review; created tasks remain. Offline, local transcription and manual task review still work; suggestions need the configured service. One draft persists across restarts. Relative dates in seeded development use the fixture clock shown by the app.
 
 This feature is implemented in development. Recording/transcription were confirmed by the user and native provider analysis succeeded; final review/acceptance checks remain pending. Launch with `. ./scripts/dev-env.ps1` then `pnpm dev:seed`; no personal reinstall is needed for development. See [setup, privacy, verification and click-paths](docs/verification/voice-inbox.md).
+
+## AI Inbox image intake
+
+Open **AI Inbox → Image**, copy an image or screenshot, and use **Paste image** or **Ctrl+V**. Choosing or dropping a file also works. A successfully added image starts analysis using the configured image-capable AI model and existing image-sharing consent. Instructions are optional; add them and use **Analyze image** to refine the results.
+
+Signal proposes meetings for invitations and calendar events, filling in visible dates, times, durations, links, and recurrence. When the project is unclear, choose it in the review; missing or ambiguous meeting details remain editable. **Create selected** creates the reviewed items. See [image intake verification](docs/verification/ai-inbox.md), including remaining native gesture and live-provider checks. Personal version **0.1.5**, installed for user testing on October 5, 2026, includes the clipboard and automatic-analysis changes plus the image output-limit fix and corrected error guidance.

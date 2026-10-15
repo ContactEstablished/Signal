@@ -66,6 +66,7 @@
     </div>
     {#each visible as item}<button
         class="meeting"
+        class:canceled={item.meeting.attendance === 'canceled'}
         style:left={`${item.left}%`}
         style:width={`${item.width}%`}
         style:top={`calc(var(--space-1) + ${item.lane} * var(--space-8))`}
@@ -82,6 +83,7 @@
   </div>
   {#each layout.filter((r) => r.outside) as item}<button
       class="outside"
+      class:canceled={item.meeting.attendance === 'canceled'}
       onclick={() =>
         onPreview(`${item.meeting.title} · Meeting details arrive in M4.`)}
       >{time(item.meeting.starts_at)} · {item.meeting.title} · Outside 9 AM–6 PM</button
@@ -89,6 +91,7 @@
 </section>
 
 <style>
+  .meeting.canceled, .outside.canceled { color: var(--text-muted); text-decoration: line-through; background: var(--surface); border-color: var(--border-dashed); }
   .strip {
     background: var(--bg-raised);
     border: var(--line) solid var(--border-section);

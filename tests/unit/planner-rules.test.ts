@@ -1,9 +1,18 @@
 import { it,expect } from 'vitest';
-import { automaticFloor,nextFree,normalizeBlock,previousMonday,previewPlan,plannerTotals,dueSoon,taskDuration,projectMeeting } from '../../src/lib/domain/planner-rules';
+import { automaticFloor,nextFree,normalizeBlock,previousMonday,previewPlan,plannerTotals,dueSoon,taskDuration,projectMeeting,plannerItems } from '../../src/lib/domain/planner-rules';
 import type { PlannerSnapshot,PlannerTask,PlannerBlock } from '../../src/lib/domain/planner';
 const task=(id:string,extra:Partial<PlannerTask>={}):PlannerTask=>({id,project_id:'p',project_name:'P',project_color:'cyan',title:id,status:'todo',priority:'medium',estimate_h:null,hours_worked:0,due_at:'2025-09-11T12:00:00.000Z',...extra} as PlannerTask);
 const block=(id:string,start_min:number,end_min:number,extra:Partial<PlannerBlock>={}):PlannerBlock=>({id,date:'2025-09-12',start_min,end_min,kind:'task',task_id:'a',done:0,...extra} as PlannerBlock);
 const snapshot=():PlannerSnapshot=>({date:'2025-09-12',time_zone:'America/New_York',blocks:[],previous_blocks:[],copy_sources:[],tasks:[task('a')],meetings:[],entries:[],claims:[],dismissed:false,fingerprint:'f',timers:{sessions:[],now_utc:'2025-09-11T17:42:00Z',offset_ms:0}});
+it('keeps canceled meetings on the timeline while releasing their planning time',()=>{
+ const s=snapshot();s.meetings=[{id:'canceled',project_id:'p',project_name:'P',project_color:'cyan',title:'Canceled review',starts_at:'2025-09-12T11:00:00Z',duration_min:60,link_url:null,agenda_md:'',notes_md:'',repeat_rule:'none',reminder_min:15,attendance:'canceled'}];
+ expect(plannerItems(s).map(i=>i.title)).toEqual(['Canceled review']);
+ expect(plannerTotals(s).planned).toBe(0);
+ expect(previewPlan(s,'quick','2025-09-11T17:42:00Z').blocks[0]).toMatchObject({start_min:420,end_min:450});
+ s.meetings[0].attendance='unmarked';
+ expect(plannerTotals(s).planned).toBe(60);
+ expect(previewPlan(s,'quick','2025-09-11T17:42:00Z').blocks[0]).toMatchObject({start_min:480,end_min:510});
+});
 it('reserves both sides of a meeting crossing a DST fold while totals retain actual duration',()=>{
  const s=snapshot();s.date='2026-11-01';s.meetings=[{id:'fold',project_id:'p',project_name:'P',project_color:'cyan',title:'Fold meeting',starts_at:'2026-11-01T05:45:00Z',duration_min:30,link_url:null,agenda_md:'',notes_md:'',repeat_rule:'none',reminder_min:15}];
  expect(projectMeeting(s.meetings[0],s.date,s.time_zone)).toMatchObject({start_min:60,end_min:120});

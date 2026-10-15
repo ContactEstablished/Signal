@@ -5,7 +5,8 @@
   import { localMinute, minuteLabel } from '../../domain/planner-rules';
   import { dateAt } from '../../domain/clock';
   import { errorMessage } from '../../domain/types';
-  import type { PlannerItem } from '../../domain/planner';
+  import type { PlannerItem, PlannerMeeting } from '../../domain/planner';
+  import type { Attendance } from '../../domain/agenda';
   import type { TimerAction } from '../../domain/timers';
   import { SIDEBAR_BLOCK_MINUTES, type PlannerTaskDrag } from '../../domain/planner-drag';
   let {
@@ -24,6 +25,7 @@
     onRemove,
     onTimer,
     onOpenMeeting,
+    onRecordMeeting,
     onJoin,
     onEditTime,
   }: {
@@ -44,6 +46,7 @@
     onOpenMeeting?: (
       ref: import('../../domain/agenda').MeetingRef,
     ) => Promise<void>;
+    onRecordMeeting?: (meeting: PlannerMeeting, attendance: Attendance) => Promise<void>;
     onJoin: (url: string) => Promise<void>;
     onEditTime: (id: string) => void;
   } = $props();
@@ -313,6 +316,7 @@
             {onTimer}
             {onJoin}
             {onOpenMeeting}
+            {onRecordMeeting}
             {onEditTime}
             onGesture={(e, kind) => begin(e, kind, p.item)}
           />

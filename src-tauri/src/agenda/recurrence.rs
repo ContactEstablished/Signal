@@ -189,7 +189,13 @@ pub async fn resolve(conn: &mut SqliteConnection, m: &Value, n: i64) -> Result<O
     }
     out["attendance"] = stored
         .as_ref()
-        .map(|s| s["attendance"].clone())
+        .map(|s| {
+            if s["marked_cancelled"] == 1 {
+                json!("canceled")
+            } else {
+                s["attendance"].clone()
+            }
+        })
         .unwrap_or(json!("unmarked"));
     out["occurrence_notes_md"] = stored
         .as_ref()

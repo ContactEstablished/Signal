@@ -82,6 +82,9 @@ export interface Alert {
 }
 export interface Meeting {
   ref?: import('./agenda').MeetingRef;
+  revision?: number;
+  attendance?: import('./agenda').Attendance;
+  occurrence_notes_md?: string;
   id: Id;
   project_id: Id;
   title: string;

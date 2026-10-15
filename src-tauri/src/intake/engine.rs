@@ -329,7 +329,10 @@ pub(super) async fn bounded_suggestions<T>(
         .map_err(|_| suggestion_timeout())?
 }
 fn suggestion_timeout() -> AppError {
-    AppError::new("Timeout", "Task suggestions timed out. Your transcript is saved. Retry Suggest tasks, or choose another model in Voice & AI settings.")
+    AppError::new("Timeout", "AI suggestions timed out. Your review is saved. Retry, or choose another model in Voice & AI settings.")
+}
+fn output_limit_error() -> AppError {
+    AppError::new("OutputLimit", "AI response reached the output limit before finishing. Your review is saved. Retry with fewer items, or choose another model in Voice & AI settings.")
 }
 fn provider_network_error(error: reqwest::Error) -> AppError {
     if error.is_timeout() {
@@ -337,7 +340,7 @@ fn provider_network_error(error: reqwest::Error) -> AppError {
     } else {
         AppError::new(
             "Network",
-            "The AI request was interrupted. Your transcript is saved; retry when ready.",
+            "The AI request was interrupted. Your review is saved; retry when ready.",
         )
     }
 }
@@ -388,9 +391,7 @@ pub(super) async fn provider_content(
     let response: Value = serde_json::from_slice(&bytes)
         .map_err(|_| AppError::validation("AI response was not valid JSON."))?;
     if response["choices"][0]["finish_reason"] == "length" {
-        return Err(AppError::validation(
-            "AI response was truncated. Try a shorter transcript.",
-        ));
+        return Err(output_limit_error());
     }
     let content = response["choices"][0]["message"]["content"]
         .as_str()
@@ -425,22 +426,21 @@ impl CompletionStream {
                 return Ok(true);
             }
             let event: Value = serde_json::from_str(data).map_err(|_| {
-                AppError::validation("AI stream was malformed. Your transcript is unchanged.")
+                AppError::validation("AI stream was malformed. Your review is saved; retry.")
             })?;
             if !event["error"].is_null() {
-                return Err(AppError::new("Provider", "The provider interrupted task suggestions. Your transcript is saved; retry Suggest tasks."));
+                return Err(AppError::new(
+                    "Provider",
+                    "The provider interrupted AI suggestions. Your review is saved; retry.",
+                ));
             }
             let choice = &event["choices"][0];
             match choice["finish_reason"].as_str() {
                 Some("stop") => self.finished = true,
-                Some("length") => {
-                    return Err(AppError::validation(
-                        "AI response was truncated. Try a shorter transcript.",
-                    ))
-                }
+                Some("length") => return Err(output_limit_error()),
                 Some(_) => {
                     return Err(AppError::validation(
-                        "AI could not finish task suggestions. Your transcript is unchanged.",
+                        "AI could not finish suggestions. Your review is saved; retry.",
                     ))
                 }
                 None => {}
@@ -453,20 +453,26 @@ impl CompletionStream {
     }
     pub(super) fn finish(self) -> Result<String> {
         if !(self.done || self.finished) || self.content.trim().is_empty() {
-            return Err(AppError::new("Network", "AI response ended before task suggestions were complete. Your transcript is saved; retry Suggest tasks."));
+            return Err(AppError::new(
+                "Network",
+                "AI response ended before suggestions were complete. Your review is saved; retry.",
+            ));
         }
         Ok(self.content)
     }
 }
 pub(super) fn configure_extraction(body: &mut Value, endpoint: &str) {
-    // This optional-reasoning DeepSeek alias defaults to high effort on OpenRouter.
-    // Keep simple extraction responsive without changing other models/providers.
-    if body["model"] == "~deepseek/deepseek-flash-latest"
-        && url::Url::parse(endpoint)
-            .ok()
-            .and_then(|u| u.host_str().map(str::to_owned))
-            .as_deref()
-            == Some("openrouter.ai")
+    // These verified DeepSeek models default to optional high reasoning on OpenRouter.
+    // Reasoning shares max_tokens with the final JSON and can exhaust the budget.
+    // Keep extraction responsive without changing other models/providers.
+    if matches!(
+        body["model"].as_str(),
+        Some("~deepseek/deepseek-flash-latest" | "deepseek/deepseek-v4.1-flash")
+    ) && url::Url::parse(endpoint)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .as_deref()
+        == Some("openrouter.ai")
     {
         body["reasoning"] = json!({"enabled": false});
     }
@@ -488,7 +494,10 @@ pub(super) fn provider_error(status: u16) -> AppError {
         500..=599 => "The provider is temporarily unavailable. Retry later.",
         _ => "The provider rejected the request. Check the API URL, model and provider settings.",
     };
-    AppError::new("Provider", format!("{action} (HTTP {status}) Your transcript is saved; retry Suggest tasks after resolving this."))
+    AppError::new(
+        "Provider",
+        format!("{action} (HTTP {status}) Your review is saved; retry after resolving this."),
+    )
 }
 pub fn parse_suggestions(mut draft: Draft, projects: &[Value], content: &str) -> Result<Draft> {
     let content = content

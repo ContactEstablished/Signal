@@ -17,7 +17,9 @@
     Timer,
     X,
   } from 'lucide-svelte';
-  import type { PlannerItem } from '../../domain/planner';
+  import type { PlannerItem, PlannerMeeting } from '../../domain/planner';
+  import type { Attendance } from '../../domain/agenda';
+  import MeetingQuickActions from '../meetings/MeetingQuickActions.svelte';
   import type { TimerAction } from '../../domain/timers';
   import { minuteLabel, endpointChoices } from '../../domain/planner-rules';
   import { formatElapsedMs, timerElapsedMs } from '../../domain/timer-math';
@@ -34,6 +36,7 @@
     onRemove,
     onTimer,
     onOpenMeeting,
+    onRecordMeeting,
     onJoin,
     onEditTime,
     onGesture,
@@ -51,6 +54,7 @@
     onOpenMeeting?: (
       ref: import('../../domain/agenda').MeetingRef,
     ) => Promise<void>;
+    onRecordMeeting?: (meeting: PlannerMeeting, attendance: Attendance) => Promise<void>;
     onJoin: (url: string) => Promise<void>;
     onEditTime: (id: string) => void;
     onGesture: (event: PointerEvent, kind: 'move' | 'resize') => void;
@@ -58,6 +62,8 @@
   let details: HTMLDialogElement;
   let busy = $state(false),
     error = $state('');
+  const canMark = $derived(!!onRecordMeeting && !!item.meeting?.ref && item.meeting.revision !== undefined && typeof item.meeting.occurrence_notes_md === 'string');
+  const canceled = $derived(item.meeting?.attendance === 'canceled');
   const own = $derived(
     !!item.block && item.session?.block_id === item.block.id,
   );
@@ -99,7 +105,14 @@
 {#snippet actions()}
   <div class="actions block-actions">
     {#if item.meeting}
-      {#if item.meeting.link_url}<button
+      {#if canMark}<MeetingQuickActions
+        title={item.title}
+        attendance={item.meeting.attendance}
+        disabled={busy || pending}
+        alwaysVisible
+        onMark={(attendance) => act(() => onRecordMeeting!(item.meeting!, attendance))}
+      />{/if}
+      {#if item.meeting.link_url && !canceled}<button
           class="outline"
           disabled={busy || pending}
           onclick={() => act(() => onJoin(item.meeting!.link_url!))}
@@ -188,10 +201,12 @@
   </div>
 {/snippet}
 <div
-  class="block"
+  class="block meeting-status-host"
   class:neutral={!item.project_color}
   class:meeting={item.kind === 'meeting'}
   class:done={!!item.block?.done}
+  class:canceled
+  data-attendance={item.meeting?.attendance}
   class:running
   class:compact
   data-color={item.project_color ?? undefined}
@@ -232,6 +247,13 @@
         />{/if}<span class="range"
         >{minuteLabel(item.start_min)}–{minuteLabel(item.end_min)}</span
       >{/if}
+    {#if item.meeting?.attendance === 'attended' || canceled}<span class="meeting-outcome" class:attended={item.meeting?.attendance === 'attended'}>{canceled ? 'Canceled' : 'Attended'}</span>{/if}
+    {#if canMark}<MeetingQuickActions
+      title={item.title}
+      attendance={item.meeting?.attendance}
+      disabled={busy || pending}
+      onMark={(attendance) => act(() => onRecordMeeting!(item.meeting!, attendance))}
+    />{/if}
     <button
       class="disclose"
       aria-label={`Show actions for ${item.title}`}
@@ -279,7 +301,7 @@
               'Personal time'}{/if}{#if item.block?.carried_from_block_id}
             · Carried over{/if}
         </div>{/if}{/if}
-    {#if !dense && item.meeting?.link_url}<button
+    {#if !dense && item.meeting?.link_url && !canceled}<button
         class="meeting-join"
         disabled={busy || pending}
         onclick={() => act(() => onJoin(item.meeting!.link_url!))}
@@ -342,6 +364,16 @@
     border-style: dashed;
     background: var(--project-meeting-fill);
   }
+  .canceled {
+    border-color: var(--border-dashed);
+    border-left-color: var(--text-muted);
+    background: var(--surface);
+    color: var(--text-muted);
+  }
+  .canceled .title { text-decoration: line-through; color: var(--text-muted); }
+  .canceled .kind { color: var(--text-muted); }
+  .meeting-outcome { flex: none; color: var(--text-muted); font-size: var(--text-chip); }
+  .meeting-outcome.attended { color: var(--lime); }
   .done {
     opacity: var(--opacity-done-block);
   }

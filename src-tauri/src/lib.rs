@@ -33,6 +33,7 @@ pub fn run() {
         .manage(window::GeometryReady::default())
         .manage(exit_guard::EditGuard::default())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(
@@ -45,6 +46,7 @@ pub fn run() {
             intake::images::save_image_draft,
             intake::images::set_intake_image,
             intake::images::set_intake_image_path,
+            intake::images::read_intake_clipboard_image,
             intake::images::get_intake_image,
             intake::images::suggest_image_items,
             intake::images::image_recovery,
@@ -101,6 +103,7 @@ pub fn run() {
             workspace::delete_entity,
             attachments::initialize_workspace,
             attachments::stage_attachments,
+            attachments::stage_image_attachment,
             attachments::discard_staged_attachments,
             attachments::add_attachments,
             attachments::remove_attachment,

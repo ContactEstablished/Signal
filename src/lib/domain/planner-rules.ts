@@ -88,12 +88,12 @@ export function plannerTotals(snapshot: PlannerSnapshot, scope='all') {
  const items=plannerItems(snapshot,scope), blocks=items.filter(i=>i.block);
  const bounds=dayBounds(snapshot.date,snapshot.time_zone);
  const plannedMinutes=(item:PlannerItem)=>item.meeting?(Math.min(Date.parse(item.meeting.starts_at)+item.meeting.duration_min*60000,Date.parse(bounds.end))-Math.max(Date.parse(item.meeting.starts_at),Date.parse(bounds.start)))/60000:item.end_min-item.start_min;
- return { planned:items.reduce((n,i)=>n+plannedMinutes(i),0), logged:snapshot.entries.filter(e=>scope==='all'||snapshot.tasks.some(t=>t.id===e.task_id&&t.project_id===scope)).reduce((n,e)=>n+e.minutes,0), done:blocks.filter(i=>i.block?.done).length, total:blocks.length };
+ return { planned:items.filter(i=>i.meeting?.attendance!=='canceled').reduce((n,i)=>n+plannedMinutes(i),0), logged:snapshot.entries.filter(e=>scope==='all'||snapshot.tasks.some(t=>t.id===e.task_id&&t.project_id===scope)).reduce((n,e)=>n+e.minutes,0), done:blocks.filter(i=>i.block?.done).length, total:blocks.length };
 }
 export function previewPlan(snapshot: PlannerSnapshot, mode: BatchMode, now: string, scope='all', selectedIds?: string[], quickKind: 'break'|'lunch'|'focus'='break'): PlanPreview {
  const result: PlanPreview={mode,blocks:[],skipped:[],conflicts:[],fingerprint:snapshot.fingerprint};
  const floor=automaticFloor(snapshot.date,now,snapshot.time_zone);
- const occupied: Range[]=plannerItems(snapshot);
+ const occupied: Range[]=plannerItems(snapshot).filter(i=>i.meeting?.attendance!=='canceled');
  const add=(id: string,draft: BlockDraft, duration: number, fixed=false) => {
   if (floor===null) { result.skipped.push({id,reason:'Automatic planning is unavailable on past dates.'}); return; }
   const range=fixed ? draft : nextFree(occupied,duration,floor);

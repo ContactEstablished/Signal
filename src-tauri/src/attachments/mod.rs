@@ -150,6 +150,33 @@ impl Files {
         }
         Ok(json!(descriptors))
     }
+    pub async fn stage_image(&self, pool: &SqlitePool, bytes: &[u8], now: &str) -> Result<Value> {
+        use std::io::Write;
+        let (mime, _, _) = crate::intake::images::validate_image(bytes)?;
+        let extension = match mime.as_str() {
+            "image/jpeg" => "jpg",
+            "image/webp" => "webp",
+            _ => "png",
+        };
+        let token = uid();
+        let relative = format!("{token}.{extension}");
+        let filename = format!("Pasted image {}.{extension}", now.replace([':', '/', '\\'], "-"));
+        insert(&mut *pool.acquire().await?, "attachment_file_ops", &json!({
+            "token": token, "relative_path": relative, "filename": filename,
+            "size": bytes.len(), "mime": mime, "state": "staging", "created_at": now
+        })).await?;
+        let result: Result<Value> = async {
+            let mut output = OpenOptions::new().write(true).create_new(true).open(self.path(&relative)?)?;
+            output.write_all(bytes)?;
+            output.sync_all()?;
+            execute(&mut *pool.acquire().await?, "UPDATE attachment_file_ops SET state='ready' WHERE token=?", vec![json!(token)]).await?;
+            Ok(json!([{"token": token, "filename": filename, "size": bytes.len(), "mime": mime}]))
+        }.await;
+        if result.is_err() {
+            self.discard(pool, &[token], now).await?;
+        }
+        result
+    }
     pub async fn discard(&self, pool: &SqlitePool, tokens: &[String], now: &str) -> Result<bool> {
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
         for token in tokens {
@@ -227,6 +254,26 @@ pub async fn stage_attachments(app: AppHandle, paths: Option<Vec<String>>) -> Re
     let files = app.state::<Files>();
     let _gate = files.gate.lock().await;
     files.stage(&pool, paths, &clock(&app)?).await
+}
+#[tauri::command]
+pub async fn stage_image_attachment(app: AppHandle, bytes: Option<Vec<u8>>) -> Result<Value> {
+    let bytes = match bytes {
+        Some(bytes) => bytes,
+        None => {
+            use tauri_plugin_clipboard_manager::ClipboardExt;
+            let handle = app.clone();
+            let image = tauri::async_runtime::spawn_blocking(move || -> Result<Option<Vec<u8>>> {
+                let Ok(image) = handle.clipboard().read_image() else { return Ok(None) };
+                crate::intake::images::clipboard_png(image.rgba(), image.width(), image.height()).map(Some)
+            }).await.map_err(|_| AppError::new("Clipboard", "Could not read the clipboard image. Try again."))??;
+            let Some(bytes) = image else { return Ok(json!([])) };
+            bytes
+        }
+    };
+    let pool = pool(&app).await?;
+    let files = app.state::<Files>();
+    let _gate = files.gate.lock().await;
+    files.stage_image(&pool, &bytes, &clock(&app)?).await
 }
 #[tauri::command]
 pub async fn discard_staged_attachments(app: AppHandle, tokens: Vec<String>) -> Result<Value> {

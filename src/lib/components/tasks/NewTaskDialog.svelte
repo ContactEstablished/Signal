@@ -8,6 +8,7 @@
   import TaskNotes from './TaskNotes.svelte';
   import TaskTags from './TaskTags.svelte';
   import AttachmentList from './AttachmentList.svelte';
+  import { pasteAttachments, imageBytes } from '../../native/attachments';
   import {
     newTaskDraft,
     normalizeDraft,
@@ -33,6 +34,7 @@
     onCreate,
     onCreated,
     onStage,
+    onStageImage,
     onDiscardStaged,
     onOpenExternalUrl,
     onClose,
@@ -46,6 +48,7 @@
     onCreate: (input: CreateTaskInput, plan: boolean) => Promise<TaskDetail>;
     onCreated: (plan: boolean) => void;
     onStage: (paths?: string[]) => Promise<StagedAttachment[]>;
+    onStageImage?: (bytes?: number[]) => Promise<StagedAttachment[]>;
     onDiscardStaged: (tokens: string[]) => Promise<CleanupResult>;
     onOpenExternalUrl: (url: string) => Promise<void>;
     onClose: () => void;
@@ -132,6 +135,9 @@
   export async function stage(paths?: string[]) {
     await run(() => onStage(paths));
   }
+  async function pasteImage(image?: File) {
+    await run(async () => onStageImage!(await imageBytes(image)));
+  }
   export async function requestClose(_reason: CloseReason): Promise<boolean> {
     if (operation) await operation;
     if (completed) return true;
@@ -196,6 +202,7 @@
 </script>
 
 <dialog
+  use:pasteAttachments={{ enabled: () => !!onStageImage && !pending && !confirm && !completed, stage: (image) => void pasteImage(image) }}
   use:backdrop
   class="m1-dialog"
   class:drop-target={dropping}

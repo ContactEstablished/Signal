@@ -50,6 +50,90 @@ fn png() -> Vec<u8> {
     cursor.into_inner()
 }
 #[test]
+fn clipboard_pixels_preserve_color_alpha_and_image_limits() {
+    let rgba = [255, 0, 0, 255, 0, 100, 200, 128];
+    let bytes = images::clipboard_png(&rgba, 2, 1).unwrap();
+    assert_eq!(
+        images::validate_image(&bytes).unwrap(),
+        ("image/png".into(), 2, 1)
+    );
+    assert_eq!(
+        image::load_from_memory(&bytes).unwrap().to_rgba8().as_raw(),
+        &rgba
+    );
+    assert!(images::clipboard_png(&rgba, 0, 1).is_err());
+    assert!(images::clipboard_png(&rgba, 5001, 5000).is_err());
+    assert!(images::clipboard_png(&rgba[..7], 2, 1).is_err());
+}
+
+#[tokio::test]
+async fn image_without_instructions_keeps_meeting_details_until_project_is_chosen() {
+    let p = database().await;
+    let project = projects::save(
+        &p,
+        None,
+        crate::workspace::models::ProjectInput {
+            name: "Atlas".into(),
+            color: "cyan".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let project_id = project["id"].as_str().unwrap().to_owned();
+    let mut d = draft("image");
+    d.transcript.clear();
+    let body = images::suggestion_body(
+        &d,
+        &[project.clone()],
+        "configured-model",
+        "data:image/png;base64,abc",
+    );
+    let context: serde_json::Value =
+        serde_json::from_str(body["messages"][1]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(context["prompt"]
+        .as_str()
+        .unwrap()
+        .contains("Identify meetings and tasks"));
+    assert_eq!(context["projects"][0]["id"], project_id);
+    let response = json!({"tasks":[{
+        "kind":"meeting", "project_id":null, "project_name":"", "title":"Design review",
+        "notes":"", "subtasks":[], "source":"Invitation: September 29, 10:00–10:45 AM",
+        "meeting":{"start_local":"2026-09-29T10:00:00", "duration_min":45, "link_url":"https://example.com/meeting", "agenda_md":"Review the designs", "repeat_rule":"none"}
+    }]}).to_string();
+    let d = engine::parse_suggestions(d, &[project], &response).unwrap();
+    assert!(d.projects.is_empty());
+    assert!(d.candidates[0].project_id.is_none());
+    let mut d = save(&p, d).await.unwrap();
+    assert!(accept(&p, request(&d), NOW).await.is_err());
+    d.candidates[0].project_id = Some(project_id);
+    let d = save(&p, d).await.unwrap();
+    let receipt = accept(&p, request(&d), NOW).await.unwrap();
+    assert_eq!(receipt["created"][0]["kind"], "meeting");
+    let stored: (String, i64, String, String) =
+        sqlx::query_as("SELECT starts_at,duration_min,link_url,agenda_md FROM meetings WHERE id=?")
+            .bind(receipt["created"][0]["id"].as_str().unwrap())
+            .fetch_one(&p)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored,
+        (
+            "2026-09-29T14:00:00.000Z".into(),
+            45,
+            "https://example.com/meeting".into(),
+            "Review the designs".into()
+        )
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks")
+            .fetch_one(&p)
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
 fn image_formats_bounds_and_corruption() {
     for format in [
         image::ImageFormat::Png,
@@ -127,9 +211,8 @@ async fn migration_preserves_legacy_voice_and_image_bytes_survive_reopen() {
         .connect_with(options.clone())
         .await
         .unwrap();
-    let mut migrations = crate::db::migrations();
-    let latest = migrations.pop().unwrap();
-    for m in migrations {
+    let migrations = crate::db::migrations();
+    for m in migrations.iter().filter(|m| m.version < 8) {
         sqlx::raw_sql(m.sql).execute(&p).await.unwrap();
     }
     let mut legacy = json!(draft("voice"));
@@ -145,7 +228,9 @@ async fn migration_preserves_legacy_voice_and_image_bytes_survive_reopen() {
         .execute(&p)
         .await
         .unwrap();
-    sqlx::raw_sql(latest.sql).execute(&p).await.unwrap();
+    for m in migrations.iter().filter(|m| m.version >= 8) {
+        sqlx::raw_sql(m.sql).execute(&p).await.unwrap();
+    }
     assert_eq!(load(&p).await.unwrap().unwrap().source_kind, "voice");
     let d = save(&p, draft("image")).await.unwrap();
     let d = images::set_image_into(&p, &d.id, d.revision, Some(png()))

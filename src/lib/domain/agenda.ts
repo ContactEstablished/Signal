@@ -3,7 +3,7 @@ export interface MeetingRef {
   meetingId: string;
   occurrenceKey: string;
 }
-export type Attendance = 'unmarked' | 'attended' | 'missed';
+export type Attendance = 'unmarked' | 'attended' | 'missed' | 'canceled';
 export interface OccurrenceRecord {
   attendance: Attendance;
   occurrence_notes_md: string;
@@ -183,3 +183,18 @@ export interface DueDraft {
   offset?: string;
 }
 export const refKey = (r: MeetingRef) => JSON.stringify(r);
+
+export function meetingRecordChange(meeting: Meeting, attendance: Attendance): MeetingChange {
+  if (!meeting.ref || !Number.isInteger(meeting.revision) || meeting.revision! < 0 || typeof meeting.occurrence_notes_md !== 'string') {
+    throw new Error('Refresh this meeting before marking its attendance.');
+  }
+  return {
+    action: 'record',
+    payload: {
+      ref: meeting.ref,
+      expectedRevision: meeting.revision!,
+      attendance,
+      occurrence_notes_md: meeting.occurrence_notes_md,
+    },
+  };
+}

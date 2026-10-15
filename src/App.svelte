@@ -21,8 +21,10 @@
     DueDraft,
     DueDestination,
     MeetingRef,
+    Attendance,
   } from './lib/domain/agenda';
-  import type { TaskDetail } from './lib/domain/types';
+  import { meetingRecordChange } from './lib/domain/agenda';
+  import type { TaskDetail, Meeting } from './lib/domain/types';
   import {
     Mic,
     Search,
@@ -91,6 +93,9 @@
     )
       return;
     workspace.editor = { kind: 'meeting', ref };
+  }
+  async function recordMeeting(meeting: Meeting, attendance: Attendance) {
+    await workspace.agendaAction(meetingRecordChange(meeting, attendance));
   }
   async function openNewMeeting() {
     const p = selectedProject ?? workspace.projects[0];
@@ -666,6 +671,7 @@
     onRetry={() => workspace.loadAgenda()}
     onOpenTask={openTask}
     onOpenMeeting={openMeeting}
+    onRecordMeeting={recordMeeting}
     onPlanTask={planAgendaTask}
     onJoin={commands.openExternalUrl}
     onNewMeeting={openNewMeeting}
@@ -676,6 +682,7 @@
     bind:this={day}
     {workspace}
     onOpenMeeting={openMeeting}
+    onRecordMeeting={recordMeeting}
     onOpenTask={openTask}
     onNewTask={openNew}
     onJoin={commands.openExternalUrl}
@@ -728,6 +735,7 @@
         onRetry={() => workspace.loadAgenda()}
         onOpenTask={openTask}
         onOpenMeeting={openMeeting}
+        onRecordMeeting={recordMeeting}
         onNewMeeting={openNewMeeting}
         onNavigateWeek={navigateWeek}
         onMoveDue={moveDue}
@@ -810,6 +818,7 @@
     onCreated={(plan) => void created(plan)}
     onMeeting={openNewMeeting}
     onStage={(paths) => workspace.stage(paths)}
+    onStageImage={(bytes) => workspace.stage(undefined, { bytes })}
     onDiscardStaged={(tokens) => workspace.discard(tokens)}
     onOpenExternalUrl={commands.openExternalUrl}
     onClose={() => void closeEditor()}
@@ -836,6 +845,7 @@
     onTags={(id, inputs) => workspace.setTags(id, inputs)}
     onAlerts={(id, offsets) => workspace.setAlerts(id, offsets)}
     onStage={(paths) => workspace.stage(paths)}
+    onStageImage={(bytes) => workspace.stage(undefined, { bytes })}
     onDiscardStaged={(tokens) => workspace.discard(tokens)}
     onAttach={(id, tokens) => workspace.attach(id, tokens)}
     onRemoveAttachment={(id) => workspace.removeAttachment(id)}

@@ -1,4 +1,4 @@
-use super::{data::*, engine, settings};
+use super::{data::*, engine, images, settings};
 use crate::workspace::{models::*, projects};
 use serde_json::json;
 use sqlx::SqlitePool;
@@ -257,8 +257,18 @@ fn extraction_disables_optional_high_reasoning_only_for_verified_provider_model_
             true,
         ),
         (
+            "https://openrouter.ai/api/v1/chat/completions",
+            "deepseek/deepseek-v4.1-flash",
+            true,
+        ),
+        (
             "https://other.example/v1",
             "~deepseek/deepseek-flash-latest",
+            false,
+        ),
+        (
+            "https://other.example/v1",
+            "deepseek/deepseek-v4.1-flash",
             false,
         ),
         (
@@ -267,17 +277,23 @@ fn extraction_disables_optional_high_reasoning_only_for_verified_provider_model_
             false,
         ),
     ] {
-        let mut body = engine::suggestion_body(&draft(), &[], model);
-        engine::configure_extraction(&mut body, url);
-        assert_eq!(
-            body.get("reasoning").cloned(),
-            if fast {
-                Some(json!({"enabled":false}))
-            } else {
-                None
-            }
-        );
-        assert_eq!(body["model"], model);
+        for mut body in [
+            engine::suggestion_body(&draft(), &[], model),
+            images::suggestion_body(&draft(), &[], model, "data:image/png;base64,abc"),
+        ] {
+            let messages = body["messages"].clone();
+            engine::configure_extraction(&mut body, url);
+            assert_eq!(
+                body.get("reasoning").cloned(),
+                if fast {
+                    Some(json!({"enabled":false}))
+                } else {
+                    None
+                }
+            );
+            assert_eq!(body["model"], model);
+            assert_eq!(body["messages"], messages);
+        }
     }
 }
 #[test]
@@ -483,7 +499,7 @@ async fn full_completion_urls_are_not_appended_twice() {
     );
 }
 #[test]
-fn provider_failures_explain_the_relevant_fix_and_preserve_transcript_guidance() {
+fn provider_failures_explain_the_relevant_fix_and_preserve_review_guidance() {
     for (status, hint) in [
         (401, "API key"),
         (403, "permissions"),
@@ -494,8 +510,63 @@ fn provider_failures_explain_the_relevant_fix_and_preserve_transcript_guidance()
         let error = engine::provider_error(status);
         assert!(error.message.contains(hint));
         assert!(error.message.contains(&format!("HTTP {status}")));
-        assert!(error.message.contains("Your transcript is saved"));
+        assert!(error.message.contains("Your review is saved"));
     }
+}
+
+#[tokio::test]
+async fn image_output_limits_reject_partial_results_without_settings_or_transcript_guidance() {
+    // A length finish can contain only reasoning, or an incomplete final answer.
+    // Both SSE and JSON responses must preserve the review rather than parse it.
+    for content in ["", "{\"tasks\":["] {
+        for streaming in [false, true] {
+            let body = if streaming {
+                let event = json!({"choices":[{"delta":{"content":content,"reasoning":"synthetic-private-reasoning"},"finish_reason":"length"}]});
+                format!("data: {event}\n\ndata: [DONE]\n\n")
+            } else {
+                json!({"choices":[{"message":{"content":content,"reasoning":"synthetic-private-reasoning"},"finish_reason":"length"}]}).to_string()
+            };
+            let headers = if streaming {
+                "Content-Type: text/event-stream\r\n"
+            } else {
+                ""
+            };
+            let (url, server) = provider_fixture("200 OK", body, headers);
+            let request = images::suggestion_body(
+                &draft(),
+                &[],
+                "deepseek/deepseek-v4.1-flash",
+                "data:image/png;base64,abc",
+            );
+            let error = engine::provider_content(
+                engine::client(3).unwrap(),
+                &url,
+                "synthetic-key",
+                &request,
+            )
+            .await
+            .map_err(images::analysis_error)
+            .unwrap_err();
+            server.join().unwrap();
+            assert_eq!(error.code, "OutputLimit");
+            assert!(error.message.contains("output limit"));
+            assert!(error.message.contains("image and instructions are saved"));
+            assert!(error.message.contains("crop the image"));
+            for misleading in [
+                "supports image",
+                "transcript",
+                "settings",
+                "synthetic-private",
+                "synthetic-key",
+            ] {
+                assert!(!error.message.contains(misleading));
+            }
+        }
+    }
+    let error = images::analysis_error(engine::provider_error(401));
+    assert!(error.message.contains("authentication failed"));
+    assert!(error.message.contains("HTTP 401"));
+    assert!(!error.message.contains("supports image"));
 }
 
 #[tokio::test]
@@ -568,7 +639,7 @@ async fn suggestion_deadline_drops_stalled_work_and_allows_retry() {
     .await
     .unwrap_err();
     assert_eq!(error.code, "Timeout");
-    assert!(error.message.contains("Your transcript is saved"));
+    assert!(error.message.contains("Your review is saved"));
     assert!(cleaned.load(Ordering::SeqCst));
     assert_eq!(
         engine::bounded_suggestions(async { Ok(7) }, Duration::from_secs(1))
