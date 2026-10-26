@@ -63,7 +63,12 @@ fn strip_fences(content: &str) -> &str {
         .strip_prefix("```json")
         .or_else(|| t.strip_prefix("```"))
         .unwrap_or(t);
-    t.strip_suffix("```").unwrap_or(t).trim()
+    let t = t.strip_suffix("```").unwrap_or(t).trim();
+    // Some models add a sentence around the JSON; keep just the outermost object.
+    match (t.find('{'), t.rfind('}')) {
+        (Some(start), Some(end)) if start > 0 && end > start => &t[start..=end],
+        _ => t,
+    }
 }
 
 fn text_field(v: &mut Option<String>, max: usize) {
@@ -304,6 +309,17 @@ mod tests {
             panic!()
         };
         assert_eq!((c.mode.as_str(), c.scope.as_deref()), ("cancel", None));
+    }
+
+    #[test]
+    fn json_wrapped_in_chatty_text_is_still_read() {
+        let parsed = parse(
+            "Sure! Here you go:
+{\"actions\":[{\"type\":\"lookup\",\"date\":null}],\"reply\":null}
+Anything else?",
+        )
+        .unwrap();
+        assert_eq!(parsed.actions.len(), 1);
     }
 
     #[test]

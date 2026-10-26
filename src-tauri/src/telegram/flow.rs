@@ -172,7 +172,7 @@ async fn text_turn(
             Some(Err(e)) => {
                 out.say(format!(
                     "{} Send another correction, or tap Cancel.",
-                    e.message
+                    plain(&e.message)
                 ));
                 let _ = p;
                 Ok(())
@@ -202,7 +202,7 @@ async fn start_request(
     let interp = match pre.interpretation {
         Some(Ok(i)) => i,
         Some(Err(e)) => {
-            out.say(format!("{} Nothing was changed.", e.message));
+            out.say(format!("{} Nothing was changed.", plain(&e.message)));
             return Ok(());
         }
         None => {
@@ -1534,4 +1534,28 @@ pub async fn day_text(conn: &mut SqliteConnection, cx: &Cx, date: NaiveDate) -> 
         text += "\n\nNothing scheduled and no tasks due.";
     }
     Ok(text)
+}
+
+/// Provider errors are written for the AI Inbox screen ("Your review is saved…"); drop that part.
+fn plain(message: &str) -> String {
+    message
+        .split(" Your review is saved")
+        .next()
+        .unwrap_or(message)
+        .trim()
+        .to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plain;
+
+    #[test]
+    fn inbox_only_advice_is_removed_from_provider_errors() {
+        assert_eq!(
+            plain("The provider is temporarily unavailable. Retry later. (HTTP 503) Your review is saved; retry after resolving this."),
+            "The provider is temporarily unavailable. Retry later. (HTTP 503)"
+        );
+        assert_eq!(plain("Nothing to trim."), "Nothing to trim.");
+    }
 }

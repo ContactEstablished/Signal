@@ -6,8 +6,8 @@ Date: October 25, 2026. Implemented on `feature/telegram` in development. The in
 
 | Check | Result |
 | --- | --- |
-| `cargo test --lib` (after `. ./scripts/dev-env.ps1`) | Passed: 114 tests (was 78). Three opt-in tests are ignored: two provider diagnostics and the real-recording check below. |
-| Telegram tests only | 36 passed, 1 ignored (manual real recording) |
+| `cargo test --lib` (after `. ./scripts/dev-env.ps1`) | Passed: 116 tests (was 78). Three opt-in tests are ignored: two provider diagnostics and the real-recording check below. |
+| Telegram tests only | 38 passed, 1 ignored (manual real recording) |
 | `cargo fmt -- --check` on the new code | Passed |
 | `pnpm check` | Passed: 0 errors, 0 warnings |
 | `pnpm test` | Passed: 43 files, 198 tests (5 new for the Settings screen) |

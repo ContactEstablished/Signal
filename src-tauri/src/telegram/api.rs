@@ -85,6 +85,19 @@ impl HttpApi {
         })
     }
 
+    /// The slash-command menu Telegram suggests while typing.
+    pub async fn set_commands(&self) -> Result<()> {
+        let commands = json!([
+            {"command":"today","description":"What is on today"},
+            {"command":"tomorrow","description":"What is on tomorrow"},
+            {"command":"help","description":"What I can do"},
+            {"command":"cancel","description":"Stop what I am asking"}
+        ]);
+        self.call("setMyCommands", json!({"commands": commands}), 20)
+            .await
+            .map(|_| ())
+    }
+
     pub async fn me(&self) -> Result<Value> {
         self.call("getMe", json!({}), 20).await
     }

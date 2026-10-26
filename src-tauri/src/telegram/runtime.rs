@@ -152,6 +152,8 @@ async fn session(app: &AppHandle) -> Result<()> {
     };
     let api = HttpApi::new(API_BASE, &token)?;
     api.clear_webhook().await?;
+    // A menu that fails to register must not stop the bot.
+    let _ = api.set_commands().await;
     state.update(|s| {
         s.connected = true;
         s.last_error = None;
