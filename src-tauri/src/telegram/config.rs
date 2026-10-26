@@ -71,7 +71,11 @@ pub struct PairingStatus {
 }
 
 fn same(a: &str, b: &str) -> bool {
-    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0, |acc, (x, y)| acc | (x ^ y)) == 0
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .fold(0, |acc, (x, y)| acc | (x ^ y))
+            == 0
 }
 
 impl Pairing {
@@ -97,7 +101,11 @@ impl Pairing {
 
     pub fn status(&self) -> PairingStatus {
         let mut state = self.0.lock().unwrap();
-        if state.active.as_ref().is_some_and(|a| a.expires <= Instant::now()) {
+        if state
+            .active
+            .as_ref()
+            .is_some_and(|a| a.expires <= Instant::now())
+        {
             state.active = None;
         }
         PairingStatus {
@@ -105,7 +113,11 @@ impl Pairing {
             seconds_left: state
                 .active
                 .as_ref()
-                .map(|a| a.expires.saturating_duration_since(Instant::now()).as_secs())
+                .map(|a| {
+                    a.expires
+                        .saturating_duration_since(Instant::now())
+                        .as_secs()
+                })
                 .unwrap_or(0),
             failures: state.failures,
             locked: state.active.is_none() && state.failures >= MAX_FAILURES,
@@ -116,7 +128,10 @@ impl Pairing {
     /// five failed attempts across all senders.
     pub fn attempt(&self, code: &str) -> PairResult {
         let mut state = self.0.lock().unwrap();
-        let live = state.active.as_ref().is_some_and(|a| a.expires > Instant::now());
+        let live = state
+            .active
+            .as_ref()
+            .is_some_and(|a| a.expires > Instant::now());
         if !live {
             state.active = None;
             return PairResult::Rejected;

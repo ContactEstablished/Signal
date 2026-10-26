@@ -29,7 +29,10 @@ impl Api for Fake {
         if *self.fail_sends.lock().unwrap() {
             return Err(AppError::new("Network", "offline"));
         }
-        self.sent.lock().unwrap().push((chat, text.to_owned(), markup.cloned()));
+        self.sent
+            .lock()
+            .unwrap()
+            .push((chat, text.to_owned(), markup.cloned()));
         let mut id = self.next_id.lock().unwrap();
         *id += 1;
         Ok(*id)
@@ -66,7 +69,10 @@ struct Script {
 }
 impl Brain for Script {
     async fn complete(&self, system: &str, user: &str) -> Result<String> {
-        self.calls.lock().unwrap().push((system.to_owned(), user.to_owned()));
+        self.calls
+            .lock()
+            .unwrap()
+            .push((system.to_owned(), user.to_owned()));
         let mut queue = self.replies.lock().unwrap();
         if queue.is_empty() {
             return Err(AppError::validation("No AI answer was scripted."));
@@ -257,16 +263,27 @@ async fn adding_a_task_asks_for_the_project_then_confirms_then_saves_once() {
     let b = bench().await;
     b.pair().await;
     b.brain.say(actions(json!([{"type":"add_task","title":"Send invoice to Acme","due_date":"2026-10-30","notes":"net 30"}])));
-    b.say("add a task to send the invoice to Acme by Friday").await;
+    b.say("add a task to send the invoice to Acme by Friday")
+        .await;
 
     let (text, _) = b.api.last();
     assert!(text.contains("Which project"), "{text}");
     b.tap("Billing").await;
 
     let (card, _) = b.api.last();
-    assert!(card.contains("Add task") && card.contains("Billing"), "{card}");
-    assert!(card.contains("Fri Oct 30, 2026 5:00 PM EDT (default 5:00 PM)"), "{card}");
-    assert_eq!(b.count("SELECT COUNT(*) FROM tasks").await, 0, "nothing is saved before Confirm");
+    assert!(
+        card.contains("Add task") && card.contains("Billing"),
+        "{card}"
+    );
+    assert!(
+        card.contains("Fri Oct 30, 2026 5:00 PM EDT (default 5:00 PM)"),
+        "{card}"
+    );
+    assert_eq!(
+        b.count("SELECT COUNT(*) FROM tasks").await,
+        0,
+        "nothing is saved before Confirm"
+    );
 
     b.tap("Confirm").await;
     assert_eq!(b.count("SELECT COUNT(*) FROM tasks").await, 1);
@@ -275,8 +292,24 @@ async fn adding_a_task_asks_for_the_project_then_confirms_then_saves_once() {
             .fetch_one(&b.pool)
             .await
             .unwrap();
-    assert_eq!(task, ("Send invoice to Acme".into(), "todo".into(), "2026-10-30T21:00:00.000Z".into(), "net 30".into()));
-    assert!(b.api.edits.lock().unwrap().last().unwrap().1.contains("Added task"));
+    assert_eq!(
+        task,
+        (
+            "Send invoice to Acme".into(),
+            "todo".into(),
+            "2026-10-30T21:00:00.000Z".into(),
+            "net 30".into()
+        )
+    );
+    assert!(b
+        .api
+        .edits
+        .lock()
+        .unwrap()
+        .last()
+        .unwrap()
+        .1
+        .contains("Added task"));
 
     // Tapping the same (now stale) Confirm again changes nothing.
     let stale = b.tap_update(&format!("k|{}|{}|y", "zzzzzzzz", 1));
@@ -289,10 +322,15 @@ async fn adding_a_task_asks_for_the_project_then_confirms_then_saves_once() {
 async fn a_replayed_confirmation_does_not_apply_twice() {
     let b = bench().await;
     b.pair().await;
-    b.brain.say(actions(json!([{"type":"add_task","title":"Once only","project_name":"Billing"}])));
+    b.brain.say(actions(
+        json!([{"type":"add_task","title":"Once only","project_name":"Billing"}]),
+    ));
     b.say("add once only to billing").await;
     let (_, markup) = b.api.last();
-    let confirm = markup.unwrap()["inline_keyboard"][0][0]["callback_data"].as_str().unwrap().to_owned();
+    let confirm = markup.unwrap()["inline_keyboard"][0][0]["callback_data"]
+        .as_str()
+        .unwrap()
+        .to_owned();
 
     // The same button update arrives twice (Telegram retry): the second is a different update id.
     let first = b.tap_update(&confirm);
@@ -310,22 +348,35 @@ async fn completing_a_task_appends_the_note_exactly_once_without_blocking_it() {
         .await
         .unwrap();
     b.brain.say(actions(json!([{"type":"complete_task","query":"vendor invoice","note":"waiting on vendor, shipped Friday"}])));
-    b.say("vendor invoice is done: waiting on vendor, shipped Friday").await;
+    b.say("vendor invoice is done: waiting on vendor, shipped Friday")
+        .await;
     let (card, _) = b.api.last();
-    assert!(card.contains("in progress → done") && card.contains("waiting on vendor, shipped Friday"), "{card}");
+    assert!(
+        card.contains("in progress → done") && card.contains("waiting on vendor, shipped Friday"),
+        "{card}"
+    );
     b.tap("Confirm").await;
 
-    let row: (String, String, Option<String>) = sqlx::query_as("SELECT status,notes_md,done_at FROM tasks WHERE id='t1'").fetch_one(&b.pool).await.unwrap();
+    let row: (String, String, Option<String>) =
+        sqlx::query_as("SELECT status,notes_md,done_at FROM tasks WHERE id='t1'")
+            .fetch_one(&b.pool)
+            .await
+            .unwrap();
     assert_eq!(row.0, "done");
     assert!(row.2.is_some());
     assert!(row.1.starts_with("Existing notes\n\n### Completion note — 2026-10-29 10:00 (UTC-04:00)\n\nwaiting on vendor, shipped Friday"), "{}", row.1);
     assert_eq!(row.1.matches("Completion note").count(), 1);
 
     // Asking again reports it is already done and appends nothing.
-    b.brain.say(actions(json!([{"type":"complete_task","query":"vendor invoice","note":"again"}])));
+    b.brain.say(actions(
+        json!([{"type":"complete_task","query":"vendor invoice","note":"again"}]),
+    ));
     b.say("vendor invoice done again").await;
     assert!(b.api.last().0.contains("already done"));
-    let notes: String = sqlx::query_scalar("SELECT notes_md FROM tasks WHERE id='t1'").fetch_one(&b.pool).await.unwrap();
+    let notes: String = sqlx::query_scalar("SELECT notes_md FROM tasks WHERE id='t1'")
+        .fetch_one(&b.pool)
+        .await
+        .unwrap();
     assert_eq!(notes.matches("Completion note").count(), 1);
 }
 
@@ -337,7 +388,9 @@ async fn several_matching_tasks_are_offered_as_buttons_and_a_stale_target_is_re_
         sqlx::query("INSERT INTO tasks(id,project_id,title,status,priority,notes_md,created_at,updated_at,sort_order) VALUES(?,'p1',?,'todo','medium','','2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z',0)")
             .bind(id).bind(title).execute(&b.pool).await.unwrap();
     }
-    b.brain.say(actions(json!([{"type":"complete_task","query":"review contract","note":null}])));
+    b.brain.say(actions(
+        json!([{"type":"complete_task","query":"review contract","note":null}]),
+    ));
     b.say("finished reviewing the contract").await;
     let (prompt, markup) = b.api.last();
     assert!(prompt.contains("Which task"), "{prompt}");
@@ -346,12 +399,31 @@ async fn several_matching_tasks_are_offered_as_buttons_and_a_stale_target_is_re_
     assert!(b.api.last().0.contains("Mark task done"));
 
     // The task changes in the app after the preview.
-    sqlx::query("UPDATE tasks SET title='Review contract B (final)', revision=revision+1 WHERE id='b'").execute(&b.pool).await.unwrap();
+    sqlx::query(
+        "UPDATE tasks SET title='Review contract B (final)', revision=revision+1 WHERE id='b'",
+    )
+    .execute(&b.pool)
+    .await
+    .unwrap();
     b.tap("Confirm").await;
-    let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id='b'").fetch_one(&b.pool).await.unwrap();
+    let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id='b'")
+        .fetch_one(&b.pool)
+        .await
+        .unwrap();
     assert_eq!(status, "todo", "a stale preview must not be applied");
-    assert!(b.api.edits.lock().unwrap().last().unwrap().1.contains("changed since"));
-    assert!(b.api.last().0.contains("Mark task done"), "a fresh preview follows");
+    assert!(b
+        .api
+        .edits
+        .lock()
+        .unwrap()
+        .last()
+        .unwrap()
+        .1
+        .contains("changed since"));
+    assert!(
+        b.api.last().0.contains("Mark task done"),
+        "a fresh preview follows"
+    );
     assert!(b.api.last().0.contains("final"));
 }
 
@@ -364,11 +436,26 @@ async fn adding_a_meeting_asks_for_missing_times_and_defaults_the_length() {
     assert!(b.api.last().0.contains("What time"));
     b.say("2:30pm").await;
     let (card, _) = b.api.last();
-    assert!(card.contains("Tue Nov 3, 2026 2:30 PM EST to 3:00 PM"), "{card}");
+    assert!(
+        card.contains("Tue Nov 3, 2026 2:30 PM EST to 3:00 PM"),
+        "{card}"
+    );
     assert!(card.contains("30 min (default)"), "{card}");
     b.tap("Confirm").await;
-    let row: (String, String, i64, String) = sqlx::query_as("SELECT title,starts_at,duration_min,repeat_rule FROM meetings").fetch_one(&b.pool).await.unwrap();
-    assert_eq!(row, ("Design review".into(), "2026-11-03T19:30:00.000Z".into(), 30, "none".into()));
+    let row: (String, String, i64, String) =
+        sqlx::query_as("SELECT title,starts_at,duration_min,repeat_rule FROM meetings")
+            .fetch_one(&b.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        row,
+        (
+            "Design review".into(),
+            "2026-11-03T19:30:00.000Z".into(),
+            30,
+            "none".into()
+        )
+    );
 }
 
 #[tokio::test]
@@ -393,26 +480,49 @@ async fn cancelling_a_one_off_meeting_keeps_it_visible_and_removing_deletes_it()
     b.pair().await;
     let draft = json!({"title":"Vendor call","starts_at":"2026-10-30T18:00:00.000Z","start_local":"2026-10-30T14:00:00.000","start_offset":"-04:00","time_zone":TZ,"duration_min":30,"link_url":null,"agenda_md":"","notes_md":"keep me","reminder_min":15,"show_in_day":true,"task_ids":[],"repeat_rule":"none","fold_policy":"earlier","repeat_until":null});
     let mut conn = b.pool.acquire().await.unwrap();
-    crate::agenda::create_in(&mut conn, "p1", &crate::agenda::models::normalize(&draft, true).unwrap(), NOW).await.unwrap();
+    crate::agenda::create_in(
+        &mut conn,
+        "p1",
+        &crate::agenda::models::normalize(&draft, true).unwrap(),
+        NOW,
+    )
+    .await
+    .unwrap();
     drop(conn);
 
-    b.brain.say(actions(json!([{"type":"cancel_meeting","query":"vendor call","mode":"cancel"}])));
+    b.brain.say(actions(
+        json!([{"type":"cancel_meeting","query":"vendor call","mode":"cancel"}]),
+    ));
     b.say("the vendor call tomorrow is cancelled").await;
     let (card, _) = b.api.last();
-    assert!(card.contains("Cancel meeting") && card.contains("struck through"), "{card}");
+    assert!(
+        card.contains("Cancel meeting") && card.contains("struck through"),
+        "{card}"
+    );
     b.tap("Confirm").await;
-    let marked: i64 = sqlx::query_scalar("SELECT marked_cancelled FROM meeting_occurrences").fetch_one(&b.pool).await.unwrap();
+    let marked: i64 = sqlx::query_scalar("SELECT marked_cancelled FROM meeting_occurrences")
+        .fetch_one(&b.pool)
+        .await
+        .unwrap();
     assert_eq!(marked, 1);
     assert_eq!(b.count("SELECT COUNT(*) FROM meetings").await, 1);
 
     // Cancelling it again is reported, not repeated.
-    b.brain.say(actions(json!([{"type":"cancel_meeting","query":"vendor call","mode":"cancel"}])));
+    b.brain.say(actions(
+        json!([{"type":"cancel_meeting","query":"vendor call","mode":"cancel"}]),
+    ));
     b.say("vendor call cancelled").await;
-    assert!(b.api.last().0.contains("couldn't find a meeting"), "{}", b.api.last().0);
+    assert!(
+        b.api.last().0.contains("couldn't find a meeting"),
+        "{}",
+        b.api.last().0
+    );
     b.say("/cancel").await;
 
     // An explicit removal permanently deletes it after its own confirmation.
-    b.brain.say(actions(json!([{"type":"cancel_meeting","query":"vendor call","mode":"remove"}])));
+    b.brain.say(actions(
+        json!([{"type":"cancel_meeting","query":"vendor call","mode":"remove"}]),
+    ));
     b.say("delete the vendor call").await;
     assert!(b.api.last().0.contains("permanently deletes"));
     b.tap("Confirm").await;
@@ -425,10 +535,19 @@ async fn a_recurring_meeting_needs_a_scope_and_ending_the_series_uses_the_cutoff
     b.pair().await;
     let draft = json!({"title":"Team standup","starts_at":"2026-10-30T13:00:00.000Z","start_local":"2026-10-30T09:00:00.000","start_offset":"-04:00","time_zone":TZ,"duration_min":15,"link_url":null,"agenda_md":"","notes_md":"","reminder_min":15,"show_in_day":true,"task_ids":[],"repeat_rule":"daily","fold_policy":"earlier","repeat_until":null});
     let mut conn = b.pool.acquire().await.unwrap();
-    crate::agenda::create_in(&mut conn, "p2", &crate::agenda::models::normalize(&draft, true).unwrap(), NOW).await.unwrap();
+    crate::agenda::create_in(
+        &mut conn,
+        "p2",
+        &crate::agenda::models::normalize(&draft, true).unwrap(),
+        NOW,
+    )
+    .await
+    .unwrap();
     drop(conn);
 
-    b.brain.say(actions(json!([{"type":"cancel_meeting","query":"standup","date":"2026-11-02","mode":"cancel"}])));
+    b.brain.say(actions(
+        json!([{"type":"cancel_meeting","query":"standup","date":"2026-11-02","mode":"cancel"}]),
+    ));
     b.say("standup on Monday is off").await;
     let (prompt, _) = b.api.last();
     assert!(prompt.contains("repeats"), "{prompt}");
@@ -437,7 +556,11 @@ async fn a_recurring_meeting_needs_a_scope_and_ending_the_series_uses_the_cutoff
     assert!(card.contains("ends the series"), "{card}");
     b.tap("Confirm").await;
     assert_eq!(b.count("SELECT COUNT(*) FROM meeting_cutoffs").await, 1);
-    assert_eq!(b.count("SELECT COUNT(*) FROM meetings").await, 1, "the series row is kept; only later occurrences end");
+    assert_eq!(
+        b.count("SELECT COUNT(*) FROM meetings").await,
+        1,
+        "the series row is kept; only later occurrences end"
+    );
 }
 
 #[tokio::test]
@@ -448,7 +571,13 @@ async fn lookups_use_stored_data_and_the_original_message_date() {
         .execute(&b.pool).await.unwrap();
     b.say("/today").await;
     let (text, _) = b.api.last();
-    assert!(text.contains("Thursday, Oct 29, 2026") && text.contains("Pay supplier") && text.contains("Overdue (1)") && text.contains("Old thing"), "{text}");
+    assert!(
+        text.contains("Thursday, Oct 29, 2026")
+            && text.contains("Pay supplier")
+            && text.contains("Overdue (1)")
+            && text.contains("Old thing"),
+        "{text}"
+    );
     assert_eq!(b.brain.calls(), 0, "/today needs no AI call");
 
     // The next day is processed late (after midnight) but the message was sent on Thursday.
@@ -463,7 +592,8 @@ async fn lookups_use_stored_data_and_the_original_message_date() {
 async fn a_new_request_while_waiting_is_never_swallowed_as_an_answer() {
     let b = bench().await;
     b.pair().await;
-    b.brain.say(actions(json!([{"type":"add_task","title":"First thing"}])));
+    b.brain
+        .say(actions(json!([{"type":"add_task","title":"First thing"}])));
     b.say("add first thing").await;
     assert!(b.api.last().0.contains("Which project"));
 
@@ -471,8 +601,15 @@ async fn a_new_request_while_waiting_is_never_swallowed_as_an_answer() {
     b.say("please also cancel the dentist meeting").await;
     let (text, markup) = b.api.last();
     assert!(text.contains("still waiting"), "{text}");
-    assert!(markup.unwrap().to_string().contains("Discard it and start this request"));
-    assert_eq!(b.brain.calls(), 1, "no AI call was spent on the parked message");
+    assert!(markup
+        .unwrap()
+        .to_string()
+        .contains("Discard it and start this request"));
+    assert_eq!(
+        b.brain.calls(),
+        1,
+        "no AI call was spent on the parked message"
+    );
 
     b.tap("Continue").await;
     assert!(b.api.last().0.contains("Which project"));
@@ -490,16 +627,29 @@ async fn a_new_request_while_waiting_is_never_swallowed_as_an_answer() {
 async fn expired_questions_report_it_and_cannot_apply_changes() {
     let b = bench().await;
     b.pair().await;
-    b.brain.say(actions(json!([{"type":"add_task","title":"Slow task","project_name":"Billing"}])));
+    b.brain.say(actions(
+        json!([{"type":"add_task","title":"Slow task","project_name":"Billing"}]),
+    ));
     b.say("add slow task to billing").await;
     let (_, markup) = b.api.last();
-    let confirm = markup.unwrap()["inline_keyboard"][0][0]["callback_data"].as_str().unwrap().to_owned();
+    let confirm = markup.unwrap()["inline_keyboard"][0][0]["callback_data"]
+        .as_str()
+        .unwrap()
+        .to_owned();
 
     b.set_now("2026-10-29T14:31:00.000Z");
     let tap = b.tap_update(&confirm);
     b.deliver(vec![tap]).await;
     assert_eq!(b.count("SELECT COUNT(*) FROM tasks").await, 0);
-    assert!(b.api.edits.lock().unwrap().last().unwrap().1.contains("expired"));
+    assert!(b
+        .api
+        .edits
+        .lock()
+        .unwrap()
+        .last()
+        .unwrap()
+        .1
+        .contains("expired"));
 
     // The next ordinary message mentions the expiry and starts fresh.
     b.brain.say(actions(json!([{"type":"lookup","date":null}])));
@@ -520,9 +670,15 @@ async fn pressing_change_applies_a_typed_correction_to_the_proposal() {
     b.brain.say(actions(json!([{"type":"add_task","title":"Draft the Q4 report","project_name":"Billing","due_date":"2026-10-30","due_time":"16:00"}])));
     b.say("call it Draft the Q4 report and make it 4pm").await;
     let (card, _) = b.api.last();
-    assert!(card.contains("Draft the Q4 report") && card.contains("4:00 PM"), "{card}");
+    assert!(
+        card.contains("Draft the Q4 report") && card.contains("4:00 PM"),
+        "{card}"
+    );
     b.tap("Confirm").await;
-    let title: String = sqlx::query_scalar("SELECT title FROM tasks").fetch_one(&b.pool).await.unwrap();
+    let title: String = sqlx::query_scalar("SELECT title FROM tasks")
+        .fetch_one(&b.pool)
+        .await
+        .unwrap();
     assert_eq!(title, "Draft the Q4 report");
 }
 
@@ -542,13 +698,17 @@ async fn voice_notes_are_transcribed_and_shown_before_confirmation() {
     let b = bench().await;
     b.pair().await;
     *b.brain.transcript.lock().unwrap() = Some("add a task to water the plants in billing".into());
-    b.brain.say(actions(json!([{"type":"add_task","title":"Water the plants","project_name":"Billing"}])));
+    b.brain.say(actions(
+        json!([{"type":"add_task","title":"Water the plants","project_name":"Billing"}]),
+    ));
     let mut update = b.message(USER, CHAT, "private", "");
     update["message"].as_object_mut().unwrap().remove("text");
     update["message"]["voice"] = json!({"file_id":"f","duration":3,"file_size":900});
     b.deliver(vec![update]).await;
     let sent = b.api.sent.lock().unwrap().clone();
-    assert!(sent.iter().any(|(_, t, _)| t.contains("Heard: “add a task to water the plants in billing”")));
+    assert!(sent
+        .iter()
+        .any(|(_, t, _)| t.contains("Heard: “add a task to water the plants in billing”")));
     assert!(sent.last().unwrap().1.contains("Water the plants"));
 
     // A voice note that cannot be read asks for text and changes nothing.
@@ -564,7 +724,9 @@ async fn voice_notes_are_transcribed_and_shown_before_confirmation() {
 async fn replies_are_retried_after_a_delivery_failure_without_repeating_effects() {
     let b = bench().await;
     b.pair().await;
-    b.brain.say(actions(json!([{"type":"add_task","title":"Resilient","project_name":"Billing"}])));
+    b.brain.say(actions(
+        json!([{"type":"add_task","title":"Resilient","project_name":"Billing"}]),
+    ));
     *b.api.fail_sends.lock().unwrap() = true;
     b.say("add resilient to billing").await;
     // The conversation state was saved even though Telegram could not be reached.

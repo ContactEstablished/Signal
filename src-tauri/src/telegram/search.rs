@@ -38,7 +38,10 @@ pub fn match_project(projects: &[Project], name: &str) -> Pick {
     if wanted.is_empty() {
         return Pick::None;
     }
-    if let Some(i) = projects.iter().position(|p| p.name.to_lowercase() == wanted) {
+    if let Some(i) = projects
+        .iter()
+        .position(|p| p.name.to_lowercase() == wanted)
+    {
         return Pick::One(i);
     }
     let hits: Vec<usize> = projects
@@ -69,7 +72,11 @@ pub fn tokens(query: &str) -> Vec<String> {
         .filter(|t| !t.is_empty())
         .map(str::to_owned)
         .collect();
-    let useful: Vec<String> = all.iter().filter(|t| !STOP.contains(&t.as_str())).cloned().collect();
+    let useful: Vec<String> = all
+        .iter()
+        .filter(|t| !STOP.contains(&t.as_str()))
+        .cloned()
+        .collect();
     if useful.is_empty() {
         all
     } else {
@@ -191,7 +198,9 @@ pub async fn day(
     let overdue = if date == today {
         rows(
             conn,
-            &format!("{select} WHERE t.status!='done' AND t.due_at<? ORDER BY t.due_at,t.title,t.id"),
+            &format!(
+                "{select} WHERE t.status!='done' AND t.due_at<? ORDER BY t.due_at,t.title,t.id"
+            ),
             vec![json!(a)],
         )
         .await?
@@ -232,7 +241,16 @@ mod tests {
         assert_eq!(tokens("the standup meeting"), vec!["standup"]);
         assert_eq!(tokens("the"), vec!["the"]);
         assert!(score("Weekly standup", "Team", "standup", &tokens("standup")).is_some());
-        assert!(score("Weekly standup", "Team", "design review", &tokens("design review")).is_none());
-        assert_eq!(score("Standup", "Team", "standup", &tokens("standup")), Some(3));
+        assert!(score(
+            "Weekly standup",
+            "Team",
+            "design review",
+            &tokens("design review")
+        )
+        .is_none());
+        assert_eq!(
+            score("Standup", "Team", "standup", &tokens("standup")),
+            Some(3)
+        );
     }
 }

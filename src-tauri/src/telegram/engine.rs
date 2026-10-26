@@ -7,7 +7,7 @@ use super::search;
 use crate::workspace::models::*;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use chrono_tz::Tz;
-use serde_json::{json, Value};
+use serde_json::Value;
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
 pub const FLOW_MINUTES: i64 = 30;
@@ -90,7 +90,11 @@ impl Cx {
     }
     pub fn message_local(&self) -> String {
         DateTime::parse_from_rfc3339(&self.message_time)
-            .map(|d| d.with_timezone(&self.tz).format("%Y-%m-%d %H:%M %A").to_string())
+            .map(|d| {
+                d.with_timezone(&self.tz)
+                    .format("%Y-%m-%d %H:%M %A")
+                    .to_string()
+            })
             .unwrap_or_default()
     }
     pub fn expiry(&self) -> String {
@@ -179,8 +183,15 @@ impl Out {
 
 enum Kind {
     Text(String),
-    Voice { file_id: String, size: u64 },
-    Callback { id: String, data: String, message_id: i64 },
+    Voice {
+        file_id: String,
+        size: u64,
+    },
+    Callback {
+        id: String,
+        data: String,
+        message_id: i64,
+    },
     Other,
 }
 struct Inbound {
@@ -271,14 +282,19 @@ pub async fn run_once<A: Api, B: Brain>(env: &Env<'_, A, B>) -> Result<()> {
             if let Some(chat) = parse_update(&value).map(|i| i.chat_id) {
                 let cfg = config::load(&mut tx).await?;
                 if cfg.chat_id == Some(chat) {
-                    insert_out(&mut tx, chat, &OutMsg {
-                        kind: "send",
-                        message_id: None,
-                        callback_id: None,
-                        body: "Something went wrong and nothing was changed. Please try again.".into(),
-                        markup: None,
-                        flow_token: None,
-                    })
+                    insert_out(
+                        &mut tx,
+                        chat,
+                        &OutMsg {
+                            kind: "send",
+                            message_id: None,
+                            callback_id: None,
+                            body: "Something went wrong and nothing was changed. Please try again."
+                                .into(),
+                            markup: None,
+                            flow_token: None,
+                        },
+                    )
                     .await?;
                 }
             }
@@ -348,7 +364,11 @@ async fn ai_context(env_tz: &str, cx: &Cx, conn: &mut SqliteConnection) -> Resul
     })
 }
 
-async fn handle<A: Api, B: Brain>(env: &Env<'_, A, B>, update_id: i64, value: &Value) -> Result<()> {
+async fn handle<A: Api, B: Brain>(
+    env: &Env<'_, A, B>,
+    update_id: i64,
+    value: &Value,
+) -> Result<()> {
     let Some(inbound) = parse_update(value) else {
         return mark_only(env.pool, update_id).await;
     };
@@ -380,7 +400,10 @@ async fn handle<A: Api, B: Brain>(env: &Env<'_, A, B>, update_id: i64, value: &V
                 chat_id: Some(inbound.chat_id),
                 ..cfg
             });
-            out.say(format!("✅ Paired. I'll only answer you.\n\n{}", flow::HELP));
+            out.say(format!(
+                "✅ Paired. I'll only answer you.\n\n{}",
+                flow::HELP
+            ));
         }
         return commit(env.pool, update_id, &cx, out).await;
     }
@@ -396,7 +419,8 @@ async fn handle<A: Api, B: Brain>(env: &Env<'_, A, B>, update_id: i64, value: &V
         Kind::Text(t) => turn = Turn::Command(t.trim().to_owned()),
         Kind::Voice { file_id, size } => {
             if *size > MAX_VOICE_BYTES {
-                pre.failure = Some("That voice note is too large. Please send text instead.".into());
+                pre.failure =
+                    Some("That voice note is too large. Please send text instead.".into());
             } else {
                 let heard = match env.api.download(file_id, MAX_VOICE_BYTES).await {
                     Ok(bytes) => env.brain.transcribe(bytes).await,
@@ -407,13 +431,29 @@ async fn handle<A: Api, B: Brain>(env: &Env<'_, A, B>, update_id: i64, value: &V
                         pre.heard = Some(t.trim().to_owned());
                         text = Some(t.trim().to_owned());
                     }
-                    Ok(_) => pre.failure = Some("I couldn't hear anything in that voice note. Please send text instead.".into()),
-                    Err(e) => pre.failure = Some(format!("I couldn't use that voice note ({}) Please send text instead.", e.message)),
+                    Ok(_) => pre.failure = Some(
+                        "I couldn't hear anything in that voice note. Please send text instead."
+                            .into(),
+                    ),
+                    Err(e) => {
+                        pre.failure = Some(format!(
+                            "I couldn't use that voice note ({}) Please send text instead.",
+                            e.message
+                        ))
+                    }
                 }
             }
         }
-        Kind::Callback { id, data, message_id } => {
-            turn = Turn::Callback { id: id.clone(), data: data.clone(), message_id: *message_id };
+        Kind::Callback {
+            id,
+            data,
+            message_id,
+        } => {
+            turn = Turn::Callback {
+                id: id.clone(),
+                data: data.clone(),
+                message_id: *message_id,
+            };
             // "Discard it and start this request" interprets the parked message.
             if let (Some(f), Some(Stage::Conflict { incoming })) = (live, &stage) {
                 if data == &format!("k|{}|{}|d", f.token, f.step) {
@@ -470,7 +510,11 @@ async fn handle<A: Api, B: Brain>(env: &Env<'_, A, B>, update_id: i64, value: &V
 pub enum Turn {
     Command(String),
     Text(String),
-    Callback { id: String, data: String, message_id: i64 },
+    Callback {
+        id: String,
+        data: String,
+        message_id: i64,
+    },
     Nothing,
 }
 
@@ -548,28 +592,47 @@ pub async fn flush_outbox<A: Api, B: Brain>(env: &Env<'_, A, B>) -> Result<()> {
             "send" => env.api.send(chat, &body, markup.as_ref()).await.map(Some),
             "edit" => env
                 .api
-                .edit(chat, row.get::<Option<i64>, _>("message_id").unwrap_or(0), &body, markup.as_ref())
+                .edit(
+                    chat,
+                    row.get::<Option<i64>, _>("message_id").unwrap_or(0),
+                    &body,
+                    markup.as_ref(),
+                )
                 .await
                 .map(|_| None),
             _ => env
                 .api
-                .answer(&row.get::<Option<String>, _>("callback_id").unwrap_or_default(), &body)
+                .answer(
+                    &row.get::<Option<String>, _>("callback_id")
+                        .unwrap_or_default(),
+                    &body,
+                )
                 .await
                 .map(|_| None),
         };
         match sent {
             Ok(message_id) => {
                 let mut tx = env.pool.begin_with("BEGIN IMMEDIATE").await?;
-                if let (Some(mid), Some(token)) = (message_id, row.get::<Option<String>, _>("flow_token")) {
+                if let (Some(mid), Some(token)) =
+                    (message_id, row.get::<Option<String>, _>("flow_token"))
+                {
                     flow::remember_message(&mut tx, chat, &token, mid).await?;
                 }
-                sqlx::query("DELETE FROM telegram_outbox WHERE id=?").bind(id).execute(&mut *tx).await?;
+                sqlx::query("DELETE FROM telegram_outbox WHERE id=?")
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
                 tx.commit().await?;
             }
-            Err(e) if matches!(e.code, "Network" | "TelegramRate" | "TelegramConflict") => return Err(e),
+            Err(e) if matches!(e.code, "Network" | "TelegramRate" | "TelegramConflict") => {
+                return Err(e)
+            }
             Err(e) => {
                 eprintln!("Telegram reply dropped: {}", e.message);
-                sqlx::query("DELETE FROM telegram_outbox WHERE id=?").bind(id).execute(env.pool).await?;
+                sqlx::query("DELETE FROM telegram_outbox WHERE id=?")
+                    .bind(id)
+                    .execute(env.pool)
+                    .await?;
             }
         }
     }
@@ -578,4 +641,3 @@ pub async fn flush_outbox<A: Api, B: Brain>(env: &Env<'_, A, B>) -> Result<()> {
 pub fn token() -> String {
     uuid::Uuid::new_v4().simple().to_string()[..8].to_owned()
 }
-

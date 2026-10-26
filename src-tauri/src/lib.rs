@@ -33,6 +33,7 @@ pub fn run() {
         .manage(intake::Voice::default())
         .manage(window::GeometryReady::default())
         .manage(exit_guard::EditGuard::default())
+        .manage(telegram::Telegram::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
@@ -112,6 +113,15 @@ pub fn run() {
             attachments::install_fixture_attachments,
             links::open_external_url,
             links::open_task_link,
+            telegram::telegram_status,
+            telegram::telegram_save_token,
+            telegram::telegram_remove_bot,
+            telegram::telegram_set_consent,
+            telegram::telegram_set_enabled,
+            telegram::telegram_start_pairing,
+            telegram::telegram_cancel_pairing,
+            telegram::telegram_unpair,
+            telegram::telegram_runtime,
             exit_guard::set_edit_guard,
             exit_guard::resolve_exit_request
         ])

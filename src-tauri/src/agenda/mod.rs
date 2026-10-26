@@ -692,8 +692,7 @@ pub async fn apply_in(tx: &mut SqliteConnection, input: AgendaInput, now: &str) 
         }
         outcome["task_id"] = json!(id);
     } else if action == "create" {
-        outcome["ref"] =
-            create_in(tx, text(payload, "projectId")?, &payload["draft"], now).await?;
+        outcome["ref"] = create_in(tx, text(payload, "projectId")?, &payload["draft"], now).await?;
     } else {
         let r = reference(payload)?;
         let m = recurrence::root(tx, &r.meeting_id).await?;
@@ -808,12 +807,7 @@ pub async fn apply_in(tx: &mut SqliteConnection, input: AgendaInput, now: &str) 
                         vec![m["id"].clone()],
                     )
                     .await?;
-                    execute(
-                        tx,
-                        "DELETE FROM meetings WHERE id=?",
-                        vec![m["id"].clone()],
-                    )
-                    .await?;
+                    execute(tx, "DELETE FROM meetings WHERE id=?", vec![m["id"].clone()]).await?;
                 } else if payload["scope"] == "following" {
                     execute(tx,"INSERT OR IGNORE INTO meeting_cutoffs(meeting_id,from_ordinal,created_at) VALUES(?,?,?)",vec![m["id"].clone(),json!(n),json!(now)]).await?;
                 } else {

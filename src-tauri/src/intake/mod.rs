@@ -166,6 +166,11 @@ pub async fn set_voice_recovery(app: AppHandle, input: Option<data::Accept>) -> 
     }
     Ok(())
 }
+/// Transcribes already-decoded 16 kHz mono samples with the local engine, for the Telegram bot.
+pub(crate) async fn transcribe_samples(app: &AppHandle, samples: Vec<i16>) -> Result<String> {
+    let task = engine::job(app)?;
+    engine::transcribe(app, samples, task).await
+}
 /// One JSON-only completion through the configured AI Inbox provider, for the Telegram bot.
 /// The caller must already hold the user's Telegram consent; this never runs without a saved
 /// endpoint, model and key.
@@ -179,7 +184,9 @@ pub(crate) async fn chat_json(app: &AppHandle, system: &str, user: &str) -> Resu
     let key = settings::key(app)?;
     let body = json!({"model":config.model,"messages":[{"role":"system","content":system},{"role":"user","content":user}],"stream":false,"max_tokens":3000});
     engine::bounded_suggestions(
-        async { engine::provider_content(engine::client(60)?, &config.endpoint, &key, &body).await },
+        async {
+            engine::provider_content(engine::client(60)?, &config.endpoint, &key, &body).await
+        },
         std::time::Duration::from_secs(60),
     )
     .await

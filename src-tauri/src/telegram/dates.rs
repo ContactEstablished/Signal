@@ -97,7 +97,8 @@ pub fn parse_date(text: &str, today: NaiveDate) -> Option<NaiveDate> {
     }
     let name = t.strip_prefix("next ").unwrap_or(&t);
     let target = weekday(name)?;
-    let ahead = (target.num_days_from_monday() as i64 - today.weekday().num_days_from_monday() as i64)
+    let ahead = (target.num_days_from_monday() as i64
+        - today.weekday().num_days_from_monday() as i64)
         .rem_euclid(7);
     Some(today + Duration::days(if ahead == 0 { 7 } else { ahead }))
 }
@@ -131,10 +132,22 @@ mod tests {
     #[test]
     fn dates_resolve_relative_to_today() {
         let today = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap(); // Sunday
-        assert_eq!(parse_date("tomorrow", today), NaiveDate::from_ymd_opt(2026, 10, 26));
-        assert_eq!(parse_date("Friday", today), NaiveDate::from_ymd_opt(2026, 10, 30));
-        assert_eq!(parse_date("sunday", today), NaiveDate::from_ymd_opt(2026, 11, 1));
-        assert_eq!(parse_date("2027-01-02", today), NaiveDate::from_ymd_opt(2027, 1, 2));
+        assert_eq!(
+            parse_date("tomorrow", today),
+            NaiveDate::from_ymd_opt(2026, 10, 26)
+        );
+        assert_eq!(
+            parse_date("Friday", today),
+            NaiveDate::from_ymd_opt(2026, 10, 30)
+        );
+        assert_eq!(
+            parse_date("sunday", today),
+            NaiveDate::from_ymd_opt(2026, 11, 1)
+        );
+        assert_eq!(
+            parse_date("2027-01-02", today),
+            NaiveDate::from_ymd_opt(2027, 1, 2)
+        );
         assert_eq!(parse_date("someday", today), None);
     }
 
@@ -142,7 +155,10 @@ mod tests {
     fn daylight_saving_gaps_and_folds_are_detected() {
         let ny: Tz = "America/New_York".parse().unwrap();
         let t = NaiveTime::from_hms_opt(2, 30, 0).unwrap();
-        assert_eq!(resolve(ny, NaiveDate::from_ymd_opt(2026, 3, 8).unwrap(), t), Local::Missing);
+        assert_eq!(
+            resolve(ny, NaiveDate::from_ymd_opt(2026, 3, 8).unwrap(), t),
+            Local::Missing
+        );
         let t = NaiveTime::from_hms_opt(1, 30, 0).unwrap();
         assert!(matches!(
             resolve(ny, NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(), t),

@@ -144,7 +144,9 @@ pub enum Stage {
     /// Waiting for the correction text after the user tapped Change.
     Revise(Proposal),
     /// A new request arrived while another was open.
-    Conflict { incoming: Incoming },
+    Conflict {
+        incoming: Incoming,
+    },
 }
 
 /// A request received while another was waiting for an answer.

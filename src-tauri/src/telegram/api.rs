@@ -6,7 +6,11 @@ use std::time::Duration;
 /// The slice of the Telegram Bot API that Signal uses. The real implementation talks to
 /// Telegram over HTTPS; tests substitute a recording fake.
 pub trait Api: Send + Sync {
-    fn updates(&self, offset: i64, timeout_s: u64) -> impl Future<Output = Result<Vec<Value>>> + Send;
+    fn updates(
+        &self,
+        offset: i64,
+        timeout_s: u64,
+    ) -> impl Future<Output = Result<Vec<Value>>> + Send;
     fn send(
         &self,
         chat: i64,
@@ -21,7 +25,11 @@ pub trait Api: Send + Sync {
         markup: Option<&Value>,
     ) -> impl Future<Output = Result<()>> + Send;
     fn answer(&self, callback_id: &str, text: &str) -> impl Future<Output = Result<()>> + Send;
-    fn download(&self, file_id: &str, max_bytes: u64) -> impl Future<Output = Result<Vec<u8>>> + Send;
+    fn download(
+        &self,
+        file_id: &str,
+        max_bytes: u64,
+    ) -> impl Future<Output = Result<Vec<u8>>> + Send;
 }
 
 pub const API_BASE: &str = "https://api.telegram.org";
@@ -112,9 +120,17 @@ impl Api for HttpApi {
             .ok_or_else(|| AppError::new("Telegram", "Telegram returned no message ID."))
     }
 
-    async fn edit(&self, chat: i64, message_id: i64, text: &str, markup: Option<&Value>) -> Result<()> {
+    async fn edit(
+        &self,
+        chat: i64,
+        message_id: i64,
+        text: &str,
+        markup: Option<&Value>,
+    ) -> Result<()> {
         let mut body = json!({"chat_id":chat,"message_id":message_id,"text":text,"disable_web_page_preview":true});
-        body["reply_markup"] = markup.cloned().unwrap_or_else(|| json!({"inline_keyboard":[]}));
+        body["reply_markup"] = markup
+            .cloned()
+            .unwrap_or_else(|| json!({"inline_keyboard":[]}));
         match self.call("editMessageText", body, 30).await {
             Ok(_) => Ok(()),
             // Re-sending an identical card is not a failure.
@@ -149,7 +165,10 @@ impl Api for HttpApi {
             .await
             .map_err(network)?;
         if !response.status().is_success() {
-            return Err(AppError::new("Telegram", "Telegram could not provide the recording."));
+            return Err(AppError::new(
+                "Telegram",
+                "Telegram could not provide the recording.",
+            ));
         }
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(network)? {

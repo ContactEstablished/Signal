@@ -59,7 +59,10 @@ fn payload(ctx: &Context, text: &str) -> Value {
 
 fn strip_fences(content: &str) -> &str {
     let t = content.trim();
-    let t = t.strip_prefix("```json").or_else(|| t.strip_prefix("```")).unwrap_or(t);
+    let t = t
+        .strip_prefix("```json")
+        .or_else(|| t.strip_prefix("```"))
+        .unwrap_or(t);
     t.strip_suffix("```").unwrap_or(t).trim()
 }
 
@@ -73,13 +76,17 @@ fn text_field(v: &mut Option<String>, max: usize) {
 }
 
 fn valid_date(v: &mut Option<String>) {
-    if v.as_deref().is_some_and(|s| super::dates::parse_date_iso(s).is_none()) {
+    if v.as_deref()
+        .is_some_and(|s| super::dates::parse_date_iso(s).is_none())
+    {
         *v = None;
     }
 }
 
 fn valid_time(v: &mut Option<String>) {
-    if v.as_deref().is_some_and(|s| super::dates::parse_time_24(s).is_none()) {
+    if v.as_deref()
+        .is_some_and(|s| super::dates::parse_time_24(s).is_none())
+    {
         *v = None;
     }
 }
@@ -100,10 +107,15 @@ pub fn sanitize(action: Action) -> Option<Action> {
                 t.due_time = None;
             }
             t.notes = clip(t.notes.trim(), 4000);
-            if t.priority.as_deref().is_some_and(|p| !["low", "medium", "high"].contains(&p)) {
+            if t.priority
+                .as_deref()
+                .is_some_and(|p| !["low", "medium", "high"].contains(&p))
+            {
                 t.priority = None;
             }
-            if t.estimate_h.is_some_and(|h| !h.is_finite() || !(0.0..=1000.0).contains(&h)) {
+            if t.estimate_h
+                .is_some_and(|h| !h.is_finite() || !(0.0..=1000.0).contains(&h))
+            {
                 t.estimate_h = None;
             }
             t.time_defaulted = false;
@@ -151,7 +163,10 @@ pub fn sanitize(action: Action) -> Option<Action> {
             if c.mode != "remove" {
                 c.mode = "cancel".into();
             }
-            if c.scope.as_deref().is_some_and(|s| !["occurrence", "following"].contains(&s)) {
+            if c.scope
+                .as_deref()
+                .is_some_and(|s| !["occurrence", "following"].contains(&s))
+            {
                 c.scope = None;
             }
             c.meeting_id = None;
@@ -170,11 +185,23 @@ pub fn parse(content: &str) -> Result<Interpretation> {
     let value: Value = serde_json::from_str(strip_fences(content))
         .map_err(|_| AppError::validation("The AI answer was not valid. Please try again."))?;
     let mut out = Interpretation {
-        reply: value["reply"].as_str().map(|s| clip(s.trim(), 600)).filter(|s| !s.is_empty()),
+        reply: value["reply"]
+            .as_str()
+            .map(|s| clip(s.trim(), 600))
+            .filter(|s| !s.is_empty()),
         ..Default::default()
     };
-    for raw in value["actions"].as_array().cloned().unwrap_or_default().into_iter().take(5) {
-        if let Some(action) = serde_json::from_value::<Action>(raw).ok().and_then(sanitize) {
+    for raw in value["actions"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .take(5)
+    {
+        if let Some(action) = serde_json::from_value::<Action>(raw)
+            .ok()
+            .and_then(sanitize)
+        {
             out.actions.push(action);
         }
     }
@@ -182,7 +209,9 @@ pub fn parse(content: &str) -> Result<Interpretation> {
 }
 
 pub async fn interpret<B: Brain>(brain: &B, ctx: &Context, text: &str) -> Result<Interpretation> {
-    let content = brain.complete(RULES, &payload(ctx, text).to_string()).await?;
+    let content = brain
+        .complete(RULES, &payload(ctx, text).to_string())
+        .await?;
     parse(&content)
 }
 
@@ -222,11 +251,17 @@ pub async fn revise<B: Brain>(
             Action::CancelMeeting(c)
         }
         (Action::AddTask(mut t), Action::AddTask(old)) => {
-            t.project_id = old.project_id.clone().filter(|_| t.project_name == old.project_name);
+            t.project_id = old
+                .project_id
+                .clone()
+                .filter(|_| t.project_name == old.project_name);
             Action::AddTask(t)
         }
         (Action::AddMeeting(mut m), Action::AddMeeting(old)) => {
-            m.project_id = old.project_id.clone().filter(|_| m.project_name == old.project_name);
+            m.project_id = old
+                .project_id
+                .clone()
+                .filter(|_| m.project_name == old.project_name);
             Action::AddMeeting(m)
         }
         (action, _) => action,
@@ -250,18 +285,24 @@ mod tests {
 ```"#;
         let parsed = parse(content).unwrap();
         assert_eq!(parsed.actions.len(), 3);
-        let Action::AddTask(t) = &parsed.actions[0] else { panic!() };
+        let Action::AddTask(t) = &parsed.actions[0] else {
+            panic!()
+        };
         assert_eq!(t.title, "Send invoice");
         assert_eq!(t.due_date.as_deref(), Some("2026-10-30"));
         assert_eq!(t.due_time, None);
         assert_eq!(t.priority, None);
         assert_eq!(t.estimate_h, None);
-        let Action::AddMeeting(m) = &parsed.actions[1] else { panic!() };
+        let Action::AddMeeting(m) = &parsed.actions[1] else {
+            panic!()
+        };
         assert_eq!(m.date, None);
         assert_eq!(m.time.as_deref(), Some("09:00"));
         assert_eq!(m.duration_min, None);
         assert_eq!(m.link_url, None);
-        let Action::CancelMeeting(c) = &parsed.actions[2] else { panic!() };
+        let Action::CancelMeeting(c) = &parsed.actions[2] else {
+            panic!()
+        };
         assert_eq!((c.mode.as_str(), c.scope.as_deref()), ("cancel", None));
     }
 

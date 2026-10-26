@@ -19,10 +19,11 @@ I always show what I understood and wait for you to tap Confirm before saving an
 const PAGE: usize = 5;
 
 pub async fn load(conn: &mut SqliteConnection, chat: i64) -> Result<Option<Flow>> {
-    let raw: Option<String> = sqlx::query_scalar("SELECT state_json FROM telegram_flow WHERE chat_id=?")
-        .bind(chat)
-        .fetch_optional(conn)
-        .await?;
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT state_json FROM telegram_flow WHERE chat_id=?")
+            .bind(chat)
+            .fetch_optional(conn)
+            .await?;
     Ok(raw.and_then(|r| serde_json::from_str(&r).ok()))
 }
 
@@ -44,7 +45,12 @@ pub async fn clear(conn: &mut SqliteConnection, chat: i64) -> Result<()> {
 }
 
 /// Records which Telegram message carries the current prompt, so it can later lose its buttons.
-pub async fn remember_message(conn: &mut SqliteConnection, chat: i64, token: &str, message_id: i64) -> Result<()> {
+pub async fn remember_message(
+    conn: &mut SqliteConnection,
+    chat: i64,
+    token: &str,
+    message_id: i64,
+) -> Result<()> {
     if let Some(mut flow) = load(conn, chat).await? {
         if flow.token == token {
             flow.message_id = Some(message_id);
@@ -88,14 +94,27 @@ pub async fn turn(
             }
             text_turn(conn, cx, &mut out, text, live, pre).await?;
         }
-        Turn::Callback { id, data, message_id } => {
-            callback_turn(conn, cx, &mut out, &id, &data, message_id, existing, expired, pre).await?;
+        Turn::Callback {
+            id,
+            data,
+            message_id,
+        } => {
+            callback_turn(
+                conn, cx, &mut out, &id, &data, message_id, existing, expired, pre,
+            )
+            .await?;
         }
     }
     Ok(out)
 }
 
-async fn command(conn: &mut SqliteConnection, cx: &Cx, out: &mut Out, cmd: &str, live: Option<Flow>) -> Result<()> {
+async fn command(
+    conn: &mut SqliteConnection,
+    cx: &Cx,
+    out: &mut Out,
+    cmd: &str,
+    live: Option<Flow>,
+) -> Result<()> {
     let name = cmd
         .split_whitespace()
         .next()
@@ -151,7 +170,10 @@ async fn text_turn(
                 drive(conn, cx, out, flow).await
             }
             Some(Err(e)) => {
-                out.say(format!("{} Send another correction, or tap Cancel.", e.message));
+                out.say(format!(
+                    "{} Send another correction, or tap Cancel.",
+                    e.message
+                ));
                 let _ = p;
                 Ok(())
             }
@@ -167,7 +189,13 @@ async fn text_turn(
     }
 }
 
-async fn start_request(conn: &mut SqliteConnection, cx: &Cx, out: &mut Out, text: &str, pre: Pre) -> Result<()> {
+async fn start_request(
+    conn: &mut SqliteConnection,
+    cx: &Cx,
+    out: &mut Out,
+    text: &str,
+    pre: Pre,
+) -> Result<()> {
     if let Some(heard) = &pre.heard {
         out.say(format!("🎙 Heard: “{}”", clip(heard, 600)));
     }
@@ -280,7 +308,12 @@ async fn callback_turn(
         ("d", Some(Stage::Conflict { incoming })) => {
             out.edit(message_id, "🗑 Discarded your earlier request.");
             out.flow = FlowChange::Clear;
-            let moved = Cx::new(cx.chat_id, &cx.tz_name, cx.now.clone(), incoming.message_time.clone())?;
+            let moved = Cx::new(
+                cx.chat_id,
+                &cx.tz_name,
+                cx.now.clone(),
+                incoming.message_time.clone(),
+            )?;
             let mut pre = pre;
             pre.heard = None;
             start_request(conn, &moved, out, &incoming.text, pre).await
@@ -319,10 +352,16 @@ async fn question_button(
     }
     match (code, q.field.as_str()) {
         ("s", "task") => {
-            flow.stage = Some(Stage::Question(search_question("task_search", "Type part of the task's name to search again.")));
+            flow.stage = Some(Stage::Question(search_question(
+                "task_search",
+                "Type part of the task's name to search again.",
+            )));
         }
         ("s", "meeting") => {
-            flow.stage = Some(Stage::Question(search_question("meeting_search", "Type part of the meeting's name to search again.")));
+            flow.stage = Some(Stage::Question(search_question(
+                "meeting_search",
+                "Type part of the meeting's name to search again.",
+            )));
         }
         ("n" | "b", "meeting" | "meeting_search") => {
             if let Some(Action::CancelMeeting(c)) = flow.current.as_mut() {
@@ -397,11 +436,19 @@ async fn answer(
     match (q.field.as_str(), action) {
         ("project", Action::AddTask(t)) => {
             t.project_id = value["id"].as_str().map(str::to_owned);
-            t.project_name = q.options.iter().find(|o| o.value == value).map(|o| o.label.clone());
+            t.project_name = q
+                .options
+                .iter()
+                .find(|o| o.value == value)
+                .map(|o| o.label.clone());
         }
         ("project", Action::AddMeeting(m)) => {
             m.project_id = value["id"].as_str().map(str::to_owned);
-            m.project_name = q.options.iter().find(|o| o.value == value).map(|o| o.label.clone());
+            m.project_name = q
+                .options
+                .iter()
+                .find(|o| o.value == value)
+                .map(|o| o.label.clone());
         }
         ("task", Action::CompleteTask(c)) => c.task_id = value["id"].as_str().map(str::to_owned),
         ("meeting", Action::CancelMeeting(c)) => {
@@ -442,7 +489,12 @@ async fn answer(
 // ---------------------------------------------------------------------------------------------
 // Moving through the queue of requests.
 
-pub async fn drive(conn: &mut SqliteConnection, cx: &Cx, out: &mut Out, mut flow: Flow) -> Result<()> {
+pub async fn drive(
+    conn: &mut SqliteConnection,
+    cx: &Cx,
+    out: &mut Out,
+    mut flow: Flow,
+) -> Result<()> {
     loop {
         let action = match flow.current.take() {
             Some(a) => a,
@@ -526,7 +578,10 @@ async fn choose_project(
         }
     }
     let prompt = match hint {
-        Some(h) => format!("I couldn't match “{}” to one of your projects. Which project is this for?", clip(h, 60)),
+        Some(h) => format!(
+            "I couldn't match “{}” to one of your projects. Which project is this for?",
+            clip(h, 60)
+        ),
         None => "Which project is this for?".to_owned(),
     };
     Ok(Chosen::Ask(Question {
@@ -562,10 +617,16 @@ fn opt(label: impl Into<String>, value: Value) -> Opt {
 }
 
 fn common_times() -> Vec<Opt> {
-    [("9:00 AM", "09:00"), ("10:00 AM", "10:00"), ("1:00 PM", "13:00"), ("2:00 PM", "14:00"), ("3:00 PM", "15:00")]
-        .iter()
-        .map(|(l, v)| opt(*l, json!(v)))
-        .collect()
+    [
+        ("9:00 AM", "09:00"),
+        ("10:00 AM", "10:00"),
+        ("1:00 PM", "13:00"),
+        ("2:00 PM", "14:00"),
+        ("3:00 PM", "15:00"),
+    ]
+    .iter()
+    .map(|(l, v)| opt(*l, json!(v)))
+    .collect()
 }
 
 /// A local date and time as a UTC instant, or the question that resolves a daylight-saving problem.
@@ -579,7 +640,12 @@ fn instant(
         Local::Single(v) => Ok(utc(v)),
         Local::Missing => Err(ask(
             "time",
-            format!("{} doesn't exist on {} in {} because the clocks change. What time should I use?", time.format("%-I:%M %p"), date, cx.tz_name),
+            format!(
+                "{} doesn't exist on {} in {} because the clocks change. What time should I use?",
+                time.format("%-I:%M %p"),
+                date,
+                cx.tz_name
+            ),
             common_times(),
             true,
         )),
@@ -588,7 +654,12 @@ fn instant(
             Some("later") => Ok(utc(b)),
             _ => Err(ask(
                 "fold",
-                format!("{} happens twice on {} in {} because the clocks change. Which one?", time.format("%-I:%M %p"), date, cx.tz_name),
+                format!(
+                    "{} happens twice on {} in {} because the clocks change. Which one?",
+                    time.format("%-I:%M %p"),
+                    date,
+                    cx.tz_name
+                ),
                 vec![
                     opt(format!("First ({})", cx.local(&utc(a))), json!("earlier")),
                     opt(format!("Second ({})", cx.local(&utc(b))), json!("later")),
@@ -623,17 +694,26 @@ async fn resolve_task(conn: &mut SqliteConnection, cx: &Cx, mut t: TaskDraft) ->
         t.time_defaulted = given.is_none();
         match instant(cx, date, time, &t.fold) {
             Ok(iso) => {
-                due_line = format!("{}{}", cx.local(&iso), if t.time_defaulted { " (default 5:00 PM)" } else { "" });
+                due_line = format!(
+                    "{}{}",
+                    cx.local(&iso),
+                    if t.time_defaulted {
+                        " (default 5:00 PM)"
+                    } else {
+                        ""
+                    }
+                );
                 due_at = json!(iso);
             }
             Err(q) => return Ok(Resolved::Ask(q, Action::AddTask(t))),
         }
     }
     let wanted = normalize(&t.title);
-    let dupes: Vec<String> = sqlx::query_scalar("SELECT title FROM tasks WHERE project_id=? AND status!='done'")
-        .bind(&project.id)
-        .fetch_all(&mut *conn)
-        .await?;
+    let dupes: Vec<String> =
+        sqlx::query_scalar("SELECT title FROM tasks WHERE project_id=? AND status!='done'")
+            .bind(&project.id)
+            .fetch_all(&mut *conn)
+            .await?;
     let mut lines = vec![
         format!("Title: {}", t.title),
         format!("Project: {}", project.name),
@@ -654,17 +734,28 @@ async fn resolve_task(conn: &mut SqliteConnection, cx: &Cx, mut t: TaskDraft) ->
         id: uid(),
         title: "Add task".into(),
         lines,
-        done_text: format!("✅ Added task “{}” to {}.", clip(&t.title, 80), project.name),
+        done_text: format!(
+            "✅ Added task “{}” to {}.",
+            clip(&t.title, 80),
+            project.name
+        ),
         op: Op::CreateTask { input },
         action: Action::AddTask(t),
     }))
 }
 
 fn normalize(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
-async fn resolve_meeting(conn: &mut SqliteConnection, cx: &Cx, mut m: MeetingDraft) -> Result<Resolved> {
+async fn resolve_meeting(
+    conn: &mut SqliteConnection,
+    cx: &Cx,
+    mut m: MeetingDraft,
+) -> Result<Resolved> {
     let project = match choose_project(conn, &m.project_id, &m.project_name).await? {
         Chosen::Project(p) => p,
         Chosen::Ask(q) => return Ok(Resolved::Ask(q, Action::AddMeeting(m))),
@@ -677,11 +768,20 @@ async fn resolve_meeting(conn: &mut SqliteConnection, cx: &Cx, mut m: MeetingDra
         return Ok(Resolved::Ask(
             ask(
                 "date",
-                format!("What day is “{}”? Tap one or type a date like 2026-10-30 or “Friday”.", clip(&m.title, 60)),
+                format!(
+                    "What day is “{}”? Tap one or type a date like 2026-10-30 or “Friday”.",
+                    clip(&m.title, 60)
+                ),
                 vec![
-                    opt(format!("Today ({})", today.format("%a %b %-d")), json!(today.to_string())),
                     opt(
-                        format!("Tomorrow ({})", (today + Duration::days(1)).format("%a %b %-d")),
+                        format!("Today ({})", today.format("%a %b %-d")),
+                        json!(today.to_string()),
+                    ),
+                    opt(
+                        format!(
+                            "Tomorrow ({})",
+                            (today + Duration::days(1)).format("%a %b %-d")
+                        ),
                         json!((today + Duration::days(1)).to_string()),
                     ),
                 ],
@@ -694,7 +794,11 @@ async fn resolve_meeting(conn: &mut SqliteConnection, cx: &Cx, mut m: MeetingDra
         return Ok(Resolved::Ask(
             ask(
                 "time",
-                format!("What time is “{}” on {}? Tap one or type a time like 2:30pm.", clip(&m.title, 60), date.format("%a %b %-d")),
+                format!(
+                    "What time is “{}” on {}? Tap one or type a time like 2:30pm.",
+                    clip(&m.title, 60),
+                    date.format("%a %b %-d")
+                ),
                 common_times(),
                 true,
             ),
@@ -728,8 +832,19 @@ async fn resolve_meeting(conn: &mut SqliteConnection, cx: &Cx, mut m: MeetingDra
     let mut lines = vec![
         format!("Title: {}", m.title),
         format!("Project: {}", project.name),
-        format!("When: {} to {}", cx.local(&starts), cx.local_clock(&utc(end))),
-        format!("Length: {minutes} min{}", if m.duration_defaulted { " (default)" } else { "" }),
+        format!(
+            "When: {} to {}",
+            cx.local(&starts),
+            cx.local_clock(&utc(end))
+        ),
+        format!(
+            "Length: {minutes} min{}",
+            if m.duration_defaulted {
+                " (default)"
+            } else {
+                ""
+            }
+        ),
     ];
     if let Some(link) = &m.link_url {
         lines.push(format!("Link: {link}"));
@@ -740,22 +855,42 @@ async fn resolve_meeting(conn: &mut SqliteConnection, cx: &Cx, mut m: MeetingDra
     if crate::agenda::models::parse(&starts)? < crate::agenda::models::parse(&cx.now)? {
         lines.push("⚠ That time is already in the past.".into());
     }
-    let existing = crate::agenda::occurrences(conn, &starts, &utc(crate::agenda::models::parse(&starts)? + Duration::seconds(1)), Some(&project.id), false).await?;
-    if existing.iter().any(|v| normalize(v["title"].as_str().unwrap_or("")) == normalize(&m.title)) {
+    let existing = crate::agenda::occurrences(
+        conn,
+        &starts,
+        &utc(crate::agenda::models::parse(&starts)? + Duration::seconds(1)),
+        Some(&project.id),
+        false,
+    )
+    .await?;
+    if existing
+        .iter()
+        .any(|v| normalize(v["title"].as_str().unwrap_or("")) == normalize(&m.title))
+    {
         lines.push("⚠ A meeting with this title already exists at that time.".into());
     }
     Ok(Resolved::Propose(Proposal {
         id: uid(),
         title: "Add meeting".into(),
         lines,
-        done_text: format!("✅ Added meeting “{}” on {}.", clip(&m.title, 80), cx.local(&starts)),
-        op: Op::CreateMeeting { project_id: project.id, draft },
+        done_text: format!(
+            "✅ Added meeting “{}” on {}.",
+            clip(&m.title, 80),
+            cx.local(&starts)
+        ),
+        op: Op::CreateMeeting {
+            project_id: project.id,
+            draft,
+        },
         action: Action::AddMeeting(m),
     }))
 }
 
 fn task_label(cx: &Cx, t: &Value) -> String {
-    let due = t["due_at"].as_str().map(|d| format!(" · due {}", cx.local(d))).unwrap_or_default();
+    let due = t["due_at"]
+        .as_str()
+        .map(|d| format!(" · due {}", cx.local(d)))
+        .unwrap_or_default();
     format!(
         "{} · {} · {}{}",
         t["title"].as_str().unwrap_or(""),
@@ -765,11 +900,17 @@ fn task_label(cx: &Cx, t: &Value) -> String {
     )
 }
 
-async fn resolve_complete(conn: &mut SqliteConnection, cx: &Cx, c: CompleteDraft) -> Result<Resolved> {
+async fn resolve_complete(
+    conn: &mut SqliteConnection,
+    cx: &Cx,
+    c: CompleteDraft,
+) -> Result<Resolved> {
     let task = if let Some(id) = &c.task_id {
         match search::task(conn, id).await {
             Ok(t) => t,
-            Err(e) if e.code == "NotFound" => return Ok(Resolved::Fail("That task no longer exists.".into())),
+            Err(e) if e.code == "NotFound" => {
+                return Ok(Resolved::Fail("That task no longer exists.".into()))
+            }
             Err(e) => return Err(e),
         }
     } else {
@@ -778,7 +919,11 @@ async fn resolve_complete(conn: &mut SqliteConnection, cx: &Cx, c: CompleteDraft
             0 => {
                 let done = search::find_tasks(conn, &c.query, true).await?;
                 return Ok(if let Some(t) = done.first() {
-                    Resolved::Info(format!("“{}” in {} is already done. Nothing to change.", t["title"].as_str().unwrap_or(""), t["project_name"].as_str().unwrap_or("")))
+                    Resolved::Info(format!(
+                        "“{}” in {} is already done. Nothing to change.",
+                        t["title"].as_str().unwrap_or(""),
+                        t["project_name"].as_str().unwrap_or("")
+                    ))
                 } else {
                     Resolved::Ask(
                         search_question("task_search", &format!("I couldn't find an open task matching “{}”. Type another name to search again.", clip(&c.query, 60))),
@@ -793,14 +938,25 @@ async fn resolve_complete(conn: &mut SqliteConnection, cx: &Cx, c: CompleteDraft
                     .map(|t| opt(task_label(cx, t), json!({"id": t["id"]})))
                     .collect();
                 return Ok(Resolved::Ask(
-                    ask("task", format!("Which task did you finish? (matches for “{}”)", clip(&c.query, 60)), options, false),
+                    ask(
+                        "task",
+                        format!(
+                            "Which task did you finish? (matches for “{}”)",
+                            clip(&c.query, 60)
+                        ),
+                        options,
+                        false,
+                    ),
                     Action::CompleteTask(c),
                 ));
             }
         }
     };
     if task["status"] == "done" {
-        return Ok(Resolved::Info(format!("“{}” is already done. Nothing to change.", task["title"].as_str().unwrap_or(""))));
+        return Ok(Resolved::Info(format!(
+            "“{}” is already done. Nothing to change.",
+            task["title"].as_str().unwrap_or("")
+        )));
     }
     let mut c = c;
     c.task_id = task["id"].as_str().map(str::to_owned);
@@ -808,13 +964,19 @@ async fn resolve_complete(conn: &mut SqliteConnection, cx: &Cx, c: CompleteDraft
     let mut lines = vec![
         format!("Task: {title}"),
         format!("Project: {}", task["project_name"].as_str().unwrap_or("")),
-        format!("Status: {} → done", task["status"].as_str().unwrap_or("").replace('_', " ")),
+        format!(
+            "Status: {} → done",
+            task["status"].as_str().unwrap_or("").replace('_', " ")
+        ),
     ];
     if let Some(due) = task["due_at"].as_str() {
         lines.push(format!("Due: {}", cx.local(due)));
     }
     if let Some(note) = &c.note {
-        lines.push(format!("Completion note (added to the task's notes, dated when you confirm): {}", clip(note, 500)));
+        lines.push(format!(
+            "Completion note (added to the task's notes, dated when you confirm): {}",
+            clip(note, 500)
+        ));
     }
     Ok(Resolved::Propose(Proposal {
         id: uid(),
@@ -832,7 +994,10 @@ async fn resolve_complete(conn: &mut SqliteConnection, cx: &Cx, c: CompleteDraft
 }
 
 fn window_origin(c: &CancelDraft, cx: &Cx) -> NaiveDate {
-    c.date.as_deref().and_then(dates::parse_date_iso).unwrap_or(cx.today)
+    c.date
+        .as_deref()
+        .and_then(dates::parse_date_iso)
+        .unwrap_or(cx.today)
 }
 
 fn meeting_label(cx: &Cx, m: &Value) -> String {
@@ -842,11 +1007,26 @@ fn meeting_label(cx: &Cx, m: &Value) -> String {
         Some("weekly") => " · repeats weekly",
         _ => "",
     };
-    let cancelled = if m["attendance"] == "canceled" { " · cancelled" } else { "" };
-    format!("{} · {} · {}{}{}", m["title"].as_str().unwrap_or(""), cx.local(starts), m["project_name"].as_str().unwrap_or(""), repeat, cancelled)
+    let cancelled = if m["attendance"] == "canceled" {
+        " · cancelled"
+    } else {
+        ""
+    };
+    format!(
+        "{} · {} · {}{}{}",
+        m["title"].as_str().unwrap_or(""),
+        cx.local(starts),
+        m["project_name"].as_str().unwrap_or(""),
+        repeat,
+        cancelled
+    )
 }
 
-async fn resolve_cancel(conn: &mut SqliteConnection, cx: &Cx, mut c: CancelDraft) -> Result<Resolved> {
+async fn resolve_cancel(
+    conn: &mut SqliteConnection,
+    cx: &Cx,
+    mut c: CancelDraft,
+) -> Result<Resolved> {
     let remove = c.mode == "remove";
     // Find the occurrence.
     let (meeting_id, occurrence_key) = match (&c.meeting_id, &c.occurrence_key) {
@@ -859,14 +1039,25 @@ async fn resolve_cancel(conn: &mut SqliteConnection, cx: &Cx, mut c: CancelDraft
                 .unwrap_or_else(|| window_origin(&c, cx));
             let days = if c.date.is_some() { 1 } else { 7 };
             let all = search::find_meetings(conn, &c.query, from, days, &cx.tz_name).await?;
-            let live: Vec<&Value> = all.iter().filter(|m| remove || m["attendance"] != "canceled").collect();
+            let live: Vec<&Value> = all
+                .iter()
+                .filter(|m| remove || m["attendance"] != "canceled")
+                .collect();
             let window = if days == 1 {
                 from.format("%a %b %-d").to_string()
             } else {
-                format!("{} – {}", from.format("%a %b %-d"), (from + Duration::days(6)).format("%a %b %-d"))
+                format!(
+                    "{} – {}",
+                    from.format("%a %b %-d"),
+                    (from + Duration::days(6)).format("%a %b %-d")
+                )
             };
             if live.is_empty() {
-                let note = if !all.is_empty() { " (the matching ones are already marked cancelled)" } else { "" };
+                let note = if !all.is_empty() {
+                    " (the matching ones are already marked cancelled)"
+                } else {
+                    ""
+                };
                 let mut q = search_question(
                     "meeting_search",
                     &format!("I couldn't find a meeting matching “{}” for {window}{note}. Type another name, or look at a different period.", clip(&c.query, 60)),
@@ -879,17 +1070,36 @@ async fn resolve_cancel(conn: &mut SqliteConnection, cx: &Cx, mut c: CancelDraft
                 c.window_start = Some(from.to_string());
                 let options = live
                     .iter()
-                    .map(|m| opt(meeting_label(cx, m), json!({"m": m["ref"]["meetingId"], "k": m["ref"]["occurrenceKey"]})))
+                    .map(|m| {
+                        opt(
+                            meeting_label(cx, m),
+                            json!({"m": m["ref"]["meetingId"], "k": m["ref"]["occurrenceKey"]}),
+                        )
+                    })
                     .collect();
                 return Ok(Resolved::Ask(
-                    ask("meeting", format!("Which meeting? (matches for “{}”, {window})", clip(&c.query, 60)), options, false),
+                    ask(
+                        "meeting",
+                        format!(
+                            "Which meeting? (matches for “{}”, {window})",
+                            clip(&c.query, 60)
+                        ),
+                        options,
+                        false,
+                    ),
                     Action::CancelMeeting(c),
                 ));
             }
             let m = live[0];
             (
-                m["ref"]["meetingId"].as_str().unwrap_or_default().to_owned(),
-                m["ref"]["occurrenceKey"].as_str().unwrap_or_default().to_owned(),
+                m["ref"]["meetingId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+                m["ref"]["occurrenceKey"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
             )
         }
     };
@@ -899,7 +1109,9 @@ async fn resolve_cancel(conn: &mut SqliteConnection, cx: &Cx, mut c: CancelDraft
     };
     let detail = match crate::agenda::meeting_detail(conn, &reference).await {
         Ok(d) => d,
-        Err(e) if e.code == "NotFound" => return Ok(Resolved::Fail("That meeting no longer exists.".into())),
+        Err(e) if e.code == "NotFound" => {
+            return Ok(Resolved::Fail("That meeting no longer exists.".into()))
+        }
         Err(e) => return Err(e),
     };
     c.meeting_id = Some(meeting_id.clone());
@@ -910,36 +1122,64 @@ async fn resolve_cancel(conn: &mut SqliteConnection, cx: &Cx, mut c: CancelDraft
     let title = occurrence["title"].as_str().unwrap_or("").to_owned();
     let when = cx.local(occurrence["starts_at"].as_str().unwrap_or(""));
     if !remove && occurrence["attendance"] == "canceled" {
-        return Ok(Resolved::Info(format!("“{title}” on {when} is already marked cancelled. Nothing to change.")));
+        return Ok(Resolved::Info(format!(
+            "“{title}” on {when} is already marked cancelled. Nothing to change."
+        )));
     }
     // A recurring meeting needs an explicit scope.
     if recurring && c.scope.is_none() {
         let options = if remove {
             vec![
-                opt("Remove this occurrence only", json!({"mode":"remove","scope":"occurrence"})),
-                opt("Remove this and all following", json!({"mode":"remove","scope":"following"})),
+                opt(
+                    "Remove this occurrence only",
+                    json!({"mode":"remove","scope":"occurrence"}),
+                ),
+                opt(
+                    "Remove this and all following",
+                    json!({"mode":"remove","scope":"following"}),
+                ),
             ]
         } else {
             vec![
-                opt("Cancel this occurrence (keep visible)", json!({"mode":"cancel","scope":"occurrence"})),
-                opt("End series from this occurrence (remove this and following)", json!({"mode":"remove","scope":"following"})),
+                opt(
+                    "Cancel this occurrence (keep visible)",
+                    json!({"mode":"cancel","scope":"occurrence"}),
+                ),
+                opt(
+                    "End series from this occurrence (remove this and following)",
+                    json!({"mode":"remove","scope":"following"}),
+                ),
             ]
         };
         return Ok(Resolved::Ask(
-            ask("scope", format!("“{title}” on {when} repeats. What should happen?"), options, false),
+            ask(
+                "scope",
+                format!("“{title}” on {when} repeats. What should happen?"),
+                options,
+                false,
+            ),
             Action::CancelMeeting(c),
         ));
     }
     let mut lines = vec![
         format!("Meeting: {title}"),
         format!("When: {when}"),
-        format!("Project: {}", occurrence["project_name"].as_str().unwrap_or("")),
+        format!(
+            "Project: {}",
+            occurrence["project_name"].as_str().unwrap_or("")
+        ),
     ];
     if recurring {
-        lines.push(format!("Repeats: {}", occurrence["repeat_rule"].as_str().unwrap_or("")));
+        lines.push(format!(
+            "Repeats: {}",
+            occurrence["repeat_rule"].as_str().unwrap_or("")
+        ));
     }
     let proposal = if !c.mode.eq("remove") && c.scope.as_deref() != Some("following") {
-        lines.push("Effect: marked cancelled. It stays on your calendar, struck through, with its notes.".into());
+        lines.push(
+            "Effect: marked cancelled. It stays on your calendar, struck through, with its notes."
+                .into(),
+        );
         Proposal {
             id: uid(),
             title: "Cancel meeting".into(),
@@ -949,7 +1189,10 @@ async fn resolve_cancel(conn: &mut SqliteConnection, cx: &Cx, mut c: CancelDraft
                 meeting_id,
                 occurrence_key,
                 revision,
-                occurrence_notes: occurrence["occurrence_notes_md"].as_str().unwrap_or("").to_owned(),
+                occurrence_notes: occurrence["occurrence_notes_md"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_owned(),
             },
             action: Action::CancelMeeting(c),
         }
@@ -971,7 +1214,12 @@ async fn resolve_cancel(conn: &mut SqliteConnection, cx: &Cx, mut c: CancelDraft
         let change = json!({"action":"remove","payload":{"ref":{"meetingId":meeting_id,"occurrenceKey":occurrence_key},"expectedRevision":revision,"scope":scope}});
         let fingerprint = match crate::agenda::preview_into(conn, &change, &cx.now).await {
             Ok(v) => v["fingerprint"].as_str().map(str::to_owned),
-            Err(e) => return Ok(Resolved::Fail(format!("I can't remove that: {}", e.message))),
+            Err(e) => {
+                return Ok(Resolved::Fail(format!(
+                    "I can't remove that: {}",
+                    e.message
+                )))
+            }
         };
         Proposal {
             id: uid(),
@@ -982,7 +1230,13 @@ async fn resolve_cancel(conn: &mut SqliteConnection, cx: &Cx, mut c: CancelDraft
                 "occurrence" => format!("✅ Removed “{}” on {}.", clip(&title, 80), when),
                 _ => format!("✅ Ended the “{}” series from {}.", clip(&title, 80), when),
             },
-            op: Op::RemoveMeeting { meeting_id, occurrence_key, revision, scope: scope.into(), fingerprint },
+            op: Op::RemoveMeeting {
+                meeting_id,
+                occurrence_key,
+                revision,
+                scope: scope.into(),
+                fingerprint,
+            },
             action: Action::CancelMeeting(c),
         }
     };
@@ -994,7 +1248,11 @@ async fn resolve_cancel(conn: &mut SqliteConnection, cx: &Cx, mut c: CancelDraft
 
 fn stamp(cx: &Cx) -> String {
     chrono::DateTime::parse_from_rfc3339(&cx.now)
-        .map(|d| d.with_timezone(&cx.tz).format("%Y-%m-%d %H:%M (UTC%:z)").to_string())
+        .map(|d| {
+            d.with_timezone(&cx.tz)
+                .format("%Y-%m-%d %H:%M (UTC%:z)")
+                .to_string()
+        })
         .unwrap_or_else(|_| cx.now.clone())
 }
 
@@ -1003,7 +1261,12 @@ async fn apply_op(conn: &mut SqliteConnection, cx: &Cx, p: &Proposal) -> Result<
         Op::CreateTask { input } => {
             crate::workspace::tasks::create_in(conn, input.clone(), &cx.now).await?;
         }
-        Op::CompleteTask { task_id, revision, notes_md, note } => {
+        Op::CompleteTask {
+            task_id,
+            revision,
+            notes_md,
+            note,
+        } => {
             let mut patch = json!({"status":"done"});
             if let Some(note) = note.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
                 let section = format!("### Completion note — {}\n\n{}\n", stamp(cx), note);
@@ -1016,14 +1279,26 @@ async fn apply_op(conn: &mut SqliteConnection, cx: &Cx, p: &Proposal) -> Result<
             crate::workspace::tasks::update_in(conn, task_id, patch, *revision, &cx.now).await?;
         }
         Op::CreateMeeting { project_id, draft } => {
-            let change = json!({"action":"create","payload":{"projectId":project_id,"draft":draft}});
+            let change =
+                json!({"action":"create","payload":{"projectId":project_id,"draft":draft}});
             agenda(conn, cx, p, change, None).await?;
         }
-        Op::CancelMeeting { meeting_id, occurrence_key, revision, occurrence_notes } => {
+        Op::CancelMeeting {
+            meeting_id,
+            occurrence_key,
+            revision,
+            occurrence_notes,
+        } => {
             let change = json!({"action":"record","payload":{"ref":{"meetingId":meeting_id,"occurrenceKey":occurrence_key},"expectedRevision":revision,"attendance":"canceled","occurrence_notes_md":occurrence_notes}});
             agenda(conn, cx, p, change, None).await?;
         }
-        Op::RemoveMeeting { meeting_id, occurrence_key, revision, scope, fingerprint } => {
+        Op::RemoveMeeting {
+            meeting_id,
+            occurrence_key,
+            revision,
+            scope,
+            fingerprint,
+        } => {
             let change = json!({"action":"remove","payload":{"ref":{"meetingId":meeting_id,"occurrenceKey":occurrence_key},"expectedRevision":revision,"scope":scope}});
             agenda(conn, cx, p, change, fingerprint.clone()).await?;
         }
@@ -1031,7 +1306,13 @@ async fn apply_op(conn: &mut SqliteConnection, cx: &Cx, p: &Proposal) -> Result<
     Ok(())
 }
 
-async fn agenda(conn: &mut SqliteConnection, cx: &Cx, p: &Proposal, change: Value, fingerprint: Option<String>) -> Result<()> {
+async fn agenda(
+    conn: &mut SqliteConnection,
+    cx: &Cx,
+    p: &Proposal,
+    change: Value,
+    fingerprint: Option<String>,
+) -> Result<()> {
     crate::agenda::apply_in(
         conn,
         AgendaInput {
@@ -1053,26 +1334,34 @@ async fn confirm(
     p: Proposal,
     message_id: i64,
 ) -> Result<()> {
-    let seen: Option<String> = sqlx::query_scalar("SELECT summary FROM telegram_applied WHERE proposal_id=?")
-        .bind(&p.id)
-        .fetch_optional(&mut *conn)
-        .await?;
+    let seen: Option<String> =
+        sqlx::query_scalar("SELECT summary FROM telegram_applied WHERE proposal_id=?")
+            .bind(&p.id)
+            .fetch_optional(&mut *conn)
+            .await?;
     if let Some(summary) = seen {
-        out.edit(message_id, format!("{summary}\n(Already saved; nothing was changed again.)"));
+        out.edit(
+            message_id,
+            format!("{summary}\n(Already saved; nothing was changed again.)"),
+        );
         flow.current = None;
         flow.stage = None;
         return drive(conn, cx, out, flow).await;
     }
-    sqlx::query("SAVEPOINT tg_apply").execute(&mut *conn).await?;
+    sqlx::query("SAVEPOINT tg_apply")
+        .execute(&mut *conn)
+        .await?;
     match apply_op(conn, cx, &p).await {
         Ok(()) => {
             sqlx::query("RELEASE tg_apply").execute(&mut *conn).await?;
-            sqlx::query("INSERT INTO telegram_applied(proposal_id,applied_at,summary) VALUES(?,?,?)")
-                .bind(&p.id)
-                .bind(&cx.now)
-                .bind(&p.done_text)
-                .execute(&mut *conn)
-                .await?;
+            sqlx::query(
+                "INSERT INTO telegram_applied(proposal_id,applied_at,summary) VALUES(?,?,?)",
+            )
+            .bind(&p.id)
+            .bind(&cx.now)
+            .bind(&p.done_text)
+            .execute(&mut *conn)
+            .await?;
             out.edit(message_id, p.done_text.clone());
             flow.done.push(p.done_text);
             flow.current = None;
@@ -1080,14 +1369,22 @@ async fn confirm(
             drive(conn, cx, out, flow).await
         }
         Err(e) => {
-            sqlx::query("ROLLBACK TO tg_apply").execute(&mut *conn).await?;
+            sqlx::query("ROLLBACK TO tg_apply")
+                .execute(&mut *conn)
+                .await?;
             sqlx::query("RELEASE tg_apply").execute(&mut *conn).await?;
             if matches!(e.code, "Conflict" | "NotFound") {
                 out.edit(message_id, "⚠ That changed since I showed it to you, so nothing was saved. Here's a fresh look.");
                 flow.current = Some(p.action);
                 flow.stage = None;
             } else {
-                out.edit(message_id, format!("❌ I couldn't save that: {} Nothing was changed.", e.message));
+                out.edit(
+                    message_id,
+                    format!(
+                        "❌ I couldn't save that: {} Nothing was changed.",
+                        e.message
+                    ),
+                );
                 flow.current = None;
                 flow.stage = None;
             }
@@ -1101,7 +1398,9 @@ async fn confirm(
 
 fn present(out: &mut Out, flow: &mut Flow) {
     flow.step += 1;
-    let Some(stage) = flow.stage.clone() else { return };
+    let Some(stage) = flow.stage.clone() else {
+        return;
+    };
     let key = |code: &str| format!("k|{}|{}|{}", flow.token, flow.step, code);
     let button = |label: &str, code: &str| json!({"text": label, "callback_data": key(code)});
     let (text, rows): (String, Vec<Vec<Value>>) = match &stage {
@@ -1154,7 +1453,11 @@ fn present(out: &mut Out, flow: &mut Flow) {
 }
 
 fn bullet(items: &[Value], cx: &Cx, render: impl Fn(&Value) -> String) -> String {
-    let mut lines: Vec<String> = items.iter().take(15).map(|i| format!("• {}", render(i))).collect();
+    let mut lines: Vec<String> = items
+        .iter()
+        .take(15)
+        .map(|i| format!("• {}", render(i)))
+        .collect();
     if items.len() > 15 {
         lines.push(format!("…and {} more", items.len() - 15));
     }
@@ -1165,19 +1468,37 @@ fn bullet(items: &[Value], cx: &Cx, render: impl Fn(&Value) -> String) -> String
 pub async fn day_text(conn: &mut SqliteConnection, cx: &Cx, date: NaiveDate) -> Result<String> {
     let view = search::day(conn, date, cx.today, &cx.tz_name).await?;
     let mut text = format!("📅 {} ({})", date.format("%A, %b %-d, %Y"), cx.tz_name);
-    let due_time = |t: &Value| t["due_at"].as_str().map(|d| cx.local_clock(d)).unwrap_or_default();
+    let due_time = |t: &Value| {
+        t["due_at"]
+            .as_str()
+            .map(|d| cx.local_clock(d))
+            .unwrap_or_default()
+    };
     if !view.overdue.is_empty() {
         text += &format!(
             "\n\nOverdue ({})\n{}",
             view.overdue.len(),
-            bullet(&view.overdue, cx, |t| format!("{} — {} · was due {}", t["title"].as_str().unwrap_or(""), t["project_name"].as_str().unwrap_or(""), t["due_at"].as_str().map(|d| cx.local(d)).unwrap_or_default()))
+            bullet(&view.overdue, cx, |t| format!(
+                "{} — {} · was due {}",
+                t["title"].as_str().unwrap_or(""),
+                t["project_name"].as_str().unwrap_or(""),
+                t["due_at"]
+                    .as_str()
+                    .map(|d| cx.local(d))
+                    .unwrap_or_default()
+            ))
         );
     }
     if !view.tasks.is_empty() {
         text += &format!(
             "\n\nTasks due ({})\n{}",
             view.tasks.len(),
-            bullet(&view.tasks, cx, |t| format!("{} — {} · {}", t["title"].as_str().unwrap_or(""), t["project_name"].as_str().unwrap_or(""), due_time(t)))
+            bullet(&view.tasks, cx, |t| format!(
+                "{} — {} · {}",
+                t["title"].as_str().unwrap_or(""),
+                t["project_name"].as_str().unwrap_or(""),
+                due_time(t)
+            ))
         );
     }
     if !view.meetings.is_empty() {
@@ -1195,7 +1516,11 @@ pub async fn day_text(conn: &mut SqliteConnection, cx: &Cx, date: NaiveDate) -> 
                     cx.local_clock(&end),
                     m["title"].as_str().unwrap_or(""),
                     m["project_name"].as_str().unwrap_or(""),
-                    if m["attendance"] == "canceled" { " (cancelled)" } else { "" }
+                    if m["attendance"] == "canceled" {
+                        " (cancelled)"
+                    } else {
+                        ""
+                    }
                 )
             })
         );
