@@ -105,7 +105,7 @@ pub fn key(app: &AppHandle) -> Result<String> {
         .map_err(|_| AppError::validation("Save the API key again."))
 }
 #[cfg(windows)]
-pub(super) fn protect(bytes: &[u8], decrypt: bool) -> Result<Vec<u8>> {
+pub(crate) fn protect(bytes: &[u8], decrypt: bool) -> Result<Vec<u8>> {
     use windows_sys::Win32::{Foundation::LocalFree, Security::Cryptography::*};
     let input = CRYPT_INTEGER_BLOB {
         cbData: bytes.len() as u32,
@@ -146,7 +146,7 @@ pub(super) fn protect(bytes: &[u8], decrypt: bool) -> Result<Vec<u8>> {
     }
 }
 #[cfg(not(windows))]
-pub(super) fn protect(_: &[u8], _: bool) -> Result<Vec<u8>> {
+pub(crate) fn protect(_: &[u8], _: bool) -> Result<Vec<u8>> {
     Err(AppError::validation(
         "Voice credentials currently require Windows.",
     ))

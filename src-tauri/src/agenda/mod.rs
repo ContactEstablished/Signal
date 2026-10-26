@@ -161,7 +161,7 @@ pub async fn meeting_detail(conn: &mut SqliteConnection, r: &MeetingRef) -> Resu
         json!({"occurrence":o,"series":{"is_recurring":is_series(conn,&m).await?,"repeat_rule":s["repeat_rule"],"repeat_weekdays":recurrence::weekdays(s)?,"repeat_until":s["repeat_until"],"fold_policy":s["fold_policy"],"revision":m["revision"]},"linked_tasks":tasks}),
     )
 }
-fn bounds(d: chrono::NaiveDate, tz: &str) -> Result<(String, String)> {
+pub(crate) fn bounds(d: chrono::NaiveDate, tz: &str) -> Result<(String, String)> {
     let z = zone(tz)?;
     // Some zones advance at midnight. The boundary is the first valid
     // local instant; an entirely skipped date shares the next day's boundary.
@@ -631,14 +631,22 @@ async fn save_record(
 }
 
 pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result<Value> {
+    let mut tx = p.begin_with("BEGIN IMMEDIATE").await?;
+    let result = apply_in(&mut tx, input, now).await?;
+    tx.commit()
+        .await
+        .map_err(|e| AppError::new("UnknownOutcome", e.to_string()))?;
+    Ok(result)
+}
+/// Shared apply path; the caller owns the transaction and its commit.
+pub async fn apply_in(tx: &mut SqliteConnection, input: AgendaInput, now: &str) -> Result<Value> {
     if input.request_id.trim().is_empty() {
         return Err(AppError::validation("Missing request identity."));
     }
-    let mut tx = p.begin_with("BEGIN IMMEDIATE").await?;
     let digest =
         hash(&json!({"change":input.change,"expectedFingerprint":input.expected_fingerprint}));
     if let Some(r) = rows(
-        &mut tx,
+        tx,
         "SELECT * FROM agenda_requests WHERE request_id=?",
         vec![json!(input.request_id)],
     )
@@ -656,19 +664,15 @@ pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result
         })?;
         // This receipt proves an earlier write committed. A readback failure
         // must never unlock a replacement write with a new request identity.
-        let result = reply(&mut tx, &o, true)
+        return reply(tx, &o, true)
             .await
-            .map_err(|e| AppError::new("UnknownOutcome", e.message))?;
-        tx.commit()
-            .await
-            .map_err(|e| AppError::new("UnknownOutcome", e.to_string()))?;
-        return Ok(result);
+            .map_err(|e| AppError::new("UnknownOutcome", e.message));
     }
-    let c = validate_change(&mut tx, &input.change).await?;
+    let c = validate_change(tx, &input.change).await?;
     let action = text(&c, "action")?;
     let payload = &c["payload"];
     if action == "edit_following" || action == "remove" {
-        let v = preview_into(&mut tx, &c, now).await?;
+        let v = preview_into(tx, &c, now).await?;
         if input.expected_fingerprint.as_deref() != v["fingerprint"].as_str() {
             return Err(AppError::conflict());
         }
@@ -676,29 +680,29 @@ pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result
     let mut outcome = json!({"ref":null,"removed":false});
     if action == "move_due" {
         let id = text(payload, "taskId")?;
-        let old = check_revision(&mut tx, id, number(payload, "expectedRevision")?).await?;
+        let old = check_revision(tx, id, number(payload, "expectedRevision")?).await?;
         if old["due_at"] != payload["dueAt"] {
             execute(
-                &mut tx,
+                tx,
                 "UPDATE tasks SET due_at=? WHERE id=?",
                 vec![payload["dueAt"].clone(), json!(id)],
             )
             .await?;
-            bump(&mut tx, id, now).await?;
+            bump(tx, id, now).await?;
         }
         outcome["task_id"] = json!(id);
     } else if action == "create" {
         outcome["ref"] =
-            create_in(&mut tx, text(payload, "projectId")?, &payload["draft"], now).await?;
+            create_in(tx, text(payload, "projectId")?, &payload["draft"], now).await?;
     } else {
         let r = reference(payload)?;
-        let m = recurrence::root(&mut tx, &r.meeting_id).await?;
+        let m = recurrence::root(tx, &r.meeting_id).await?;
         let n = r.ordinal()?;
-        let old = recurrence::resolve(&mut tx, &m, n)
+        let old = recurrence::resolve(tx, &m, n)
             .await?
             .ok_or_else(AppError::missing)?;
         outcome["ref"] = json!(r);
-        let g = graph(&mut tx, &r.meeting_id).await?;
+        let g = graph(tx, &r.meeting_id).await?;
         let mut affected = std::collections::BTreeSet::<String>::new();
         for k in ["segment_tasks", "occurrence_tasks"] {
             for link in g[k].as_array().unwrap() {
@@ -716,7 +720,7 @@ pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result
             owners.insert(
                 text(
                     &one(
-                        &mut tx,
+                        tx,
                         "SELECT project_id FROM tasks WHERE id=?",
                         vec![json!(id)],
                     )
@@ -729,24 +733,24 @@ pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result
         outcome["affected_task_ids"] = json!(affected);
         outcome["affected_project_ids"] = json!(owners);
         match action {
-            "edit_occurrence" => save_snapshot(&mut tx, &m, n, &payload["draft"], now).await?,
+            "edit_occurrence" => save_snapshot(tx, &m, n, &payload["draft"], now).await?,
             "record" => {
-                save_snapshot(&mut tx, &m, n, &old, now).await?;
-                save_record(&mut tx, &m, n, payload).await?;
+                save_snapshot(tx, &m, n, &old, now).await?;
+                save_record(tx, &m, n, payload).await?;
             }
             "edit_following" => {
-                let past = protected(&mut tx, &m, n, now).await?;
+                let past = protected(tx, &m, n, now).await?;
                 for (i, o) in &past {
-                    if rows(&mut tx,"SELECT 1 FROM meeting_occurrences WHERE meeting_id=? AND ordinal=? AND snapshot_json IS NOT NULL",vec![m["id"].clone(),json!(i)]).await?.is_empty(){save_snapshot(&mut tx,&m,*i,o,now).await?;}
+                    if rows(tx,"SELECT 1 FROM meeting_occurrences WHERE meeting_id=? AND ordinal=? AND snapshot_json IS NOT NULL",vec![m["id"].clone(),json!(i)]).await?.is_empty(){save_snapshot(tx,&m,*i,o,now).await?;}
                 }
                 let v = uid();
                 insert(
-                    &mut tx,
+                    tx,
                     "meeting_versions",
                     &json!({"id":v,"meeting_id":m["id"],"created_at":now}),
                 )
                 .await?;
-                for mut s in recurrence::segments(&mut tx, &m).await? {
+                for mut s in recurrence::segments(tx, &m).await? {
                     if number(&s, "from_ordinal")? >= n {
                         continue;
                     }
@@ -754,41 +758,41 @@ pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result
                     s["id"] = json!(uid());
                     s["version_id"] = json!(v);
                     s["to_ordinal"] = json!(s["to_ordinal"].as_i64().unwrap_or(n).min(n));
-                    insert(&mut tx, "meeting_segments", &s).await?;
+                    insert(tx, "meeting_segments", &s).await?;
                     for l in rows(
-                        &mut tx,
+                        tx,
                         "SELECT task_id FROM meeting_segment_tasks WHERE segment_id=?",
                         vec![sid],
                     )
                     .await?
                     {
                         insert(
-                            &mut tx,
+                            tx,
                             "meeting_segment_tasks",
                             &json!({"segment_id":s["id"],"task_id":l["task_id"]}),
                         )
                         .await?;
                     }
                 }
-                segment(&mut tx, &v, n, None, &payload["draft"]).await?;
+                segment(tx, &v, n, None, &payload["draft"]).await?;
                 execute(
-                    &mut tx,
+                    tx,
                     "UPDATE meetings SET active_version_id=? WHERE id=?",
                     vec![json!(v), m["id"].clone()],
                 )
                 .await?;
                 if !past.iter().any(|v| v.0 == n) {
-                    save_snapshot(&mut tx, &m, n, &payload["draft"], now).await?;
+                    save_snapshot(tx, &m, n, &payload["draft"], now).await?;
                 }
                 execute(
-                    &mut tx,
+                    tx,
                     "DELETE FROM meeting_tasks WHERE meeting_id=?",
                     vec![m["id"].clone()],
                 )
                 .await?;
                 for t in payload["draft"]["task_ids"].as_array().unwrap() {
                     insert(
-                        &mut tx,
+                        tx,
                         "meeting_tasks",
                         &json!({"meeting_id":m["id"],"task_id":t}),
                     )
@@ -799,22 +803,22 @@ pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result
                 outcome["removed"] = json!(true);
                 if payload["scope"] == "one_off" {
                     execute(
-                        &mut tx,
+                        tx,
                         "DELETE FROM meeting_tasks WHERE meeting_id=?",
                         vec![m["id"].clone()],
                     )
                     .await?;
                     execute(
-                        &mut tx,
+                        tx,
                         "DELETE FROM meetings WHERE id=?",
                         vec![m["id"].clone()],
                     )
                     .await?;
                 } else if payload["scope"] == "following" {
-                    execute(&mut tx,"INSERT OR IGNORE INTO meeting_cutoffs(meeting_id,from_ordinal,created_at) VALUES(?,?,?)",vec![m["id"].clone(),json!(n),json!(now)]).await?;
+                    execute(tx,"INSERT OR IGNORE INTO meeting_cutoffs(meeting_id,from_ordinal,created_at) VALUES(?,?,?)",vec![m["id"].clone(),json!(n),json!(now)]).await?;
                 } else {
-                    save_snapshot(&mut tx, &m, n, &old, now).await?;
-                    execute(&mut tx,"UPDATE meeting_occurrences SET cancelled=1 WHERE meeting_id=? AND ordinal=?",vec![m["id"].clone(),json!(n)]).await?;
+                    save_snapshot(tx, &m, n, &old, now).await?;
+                    execute(tx,"UPDATE meeting_occurrences SET cancelled=1 WHERE meeting_id=? AND ordinal=?",vec![m["id"].clone(),json!(n)]).await?;
                 }
             }
             _ => unreachable!(),
@@ -822,20 +826,17 @@ pub async fn apply_into(p: &SqlitePool, input: AgendaInput, now: &str) -> Result
         // The main Save meeting action commits the schedule and this occurrence's
         // attendance/notes in the same transaction and under one replay identity.
         if let Some(record) = payload.get("occurrence") {
-            save_record(&mut tx, &m, n, record).await?;
+            save_record(tx, &m, n, record).await?;
         }
         execute(
-            &mut tx,
+            tx,
             "UPDATE meetings SET revision=revision+1 WHERE id=?",
             vec![m["id"].clone()],
         )
         .await?;
     }
-    let result = reply(&mut tx, &outcome, false).await?;
-    insert(&mut tx,"agenda_requests",&json!({"request_id":input.request_id,"payload_hash":digest,"outcome_json":outcome.to_string()})).await?;
-    tx.commit()
-        .await
-        .map_err(|e| AppError::new("UnknownOutcome", e.to_string()))?;
+    let result = reply(tx, &outcome, false).await?;
+    insert(tx,"agenda_requests",&json!({"request_id":input.request_id,"payload_hash":digest,"outcome_json":outcome.to_string()})).await?;
     Ok(result)
 }
 #[tauri::command]

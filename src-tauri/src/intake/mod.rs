@@ -1,7 +1,7 @@
 mod data;
 mod engine;
 pub mod images;
-mod settings;
+pub(crate) mod settings;
 use crate::workspace::models::*;
 pub use engine::Voice;
 use serde_json::{json, Value};
@@ -165,6 +165,24 @@ pub async fn set_voice_recovery(app: AppHandle, input: Option<data::Accept>) -> 
             .await?;
     }
     Ok(())
+}
+/// One JSON-only completion through the configured AI Inbox provider, for the Telegram bot.
+/// The caller must already hold the user's Telegram consent; this never runs without a saved
+/// endpoint, model and key.
+pub(crate) async fn chat_json(app: &AppHandle, system: &str, user: &str) -> Result<String> {
+    let config = settings::load(app).await?;
+    if config.endpoint.is_empty() || config.model.is_empty() {
+        return Err(AppError::validation(
+            "Set the AI provider URL and model in Voice & AI settings first.",
+        ));
+    }
+    let key = settings::key(app)?;
+    let body = json!({"model":config.model,"messages":[{"role":"system","content":system},{"role":"user","content":user}],"stream":false,"max_tokens":3000});
+    engine::bounded_suggestions(
+        async { engine::provider_content(engine::client(60)?, &config.endpoint, &key, &body).await },
+        std::time::Duration::from_secs(60),
+    )
+    .await
 }
 pub fn initialize(app: &AppHandle) -> Result<()> {
     let root = settings::root(app)?;

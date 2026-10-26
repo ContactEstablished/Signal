@@ -6,6 +6,7 @@ mod exit_guard;
 mod intake;
 mod links;
 mod planner;
+mod telegram;
 mod timers;
 mod tray;
 mod window;

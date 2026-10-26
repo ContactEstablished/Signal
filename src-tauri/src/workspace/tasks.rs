@@ -240,18 +240,30 @@ pub async fn update(
     revision: i64,
     now: &str,
 ) -> Result<Value> {
-    let patch = normalize_patch(&patch)?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let old = check_revision(&mut tx, id, revision).await?;
+    let reply = update_in(&mut tx, id, patch, revision, now).await?;
+    tx.commit().await?;
+    Ok(reply)
+}
+/// Shared update path; the caller owns the transaction.
+pub async fn update_in(
+    tx: &mut SqliteConnection,
+    id: &str,
+    patch: Value,
+    revision: i64,
+    now: &str,
+) -> Result<Value> {
+    let patch = normalize_patch(&patch)?;
+    let old = check_revision(tx, id, revision).await?;
     let mut changed = false;
     for (field, value) in patch.as_object().unwrap() {
         if old[field] != *value {
             changed = true;
             if field == "status" {
-                move_in(&mut tx, &old, value.as_str().unwrap(), None, now).await?;
+                move_in(tx, &old, value.as_str().unwrap(), None, now).await?;
             } else {
                 execute(
-                    &mut tx,
+                    tx,
                     &format!("UPDATE tasks SET {field}=? WHERE id=?"),
                     vec![value.clone(), json!(id)],
                 )
@@ -260,11 +272,9 @@ pub async fn update(
         }
     }
     if changed {
-        bump(&mut tx, id, now).await?;
+        bump(tx, id, now).await?;
     }
-    let reply = detail(&mut tx, id).await?;
-    tx.commit().await?;
-    Ok(reply)
+    detail(tx, id).await
 }
 pub async fn set_children(
     conn: &mut SqliteConnection,
