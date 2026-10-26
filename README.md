@@ -21,6 +21,8 @@ Your Day meeting bars now offer **Attended** and **Canceled** actions on hover o
 
 Meeting time controls and selectable weekly weekdays have development-only improvements pending an explicit live-update request. See [behavior, compatibility, and verification](docs/verification/meeting-time-weekdays.md). The personal installation remains on its existing build.
 
+A Telegram bot can add tasks and meetings, complete a task with a note, cancel or remove a meeting, and answer agenda questions from your phone, with a confirmation card before anything is saved. It is development-only until an explicit live-update request. See [how it works and how to set it up](docs/Features/Telegram/Implementation.md) and [verification and the manual test script](docs/verification/telegram.md). Building now needs CMake (for the bundled Opus decoder).
+
 Use Node 22.14+, pnpm 10.33.2, Rust stable MSVC, Visual Studio's Desktop development with C++ workload, Windows SDK, and WebView2.
 
 ```powershell

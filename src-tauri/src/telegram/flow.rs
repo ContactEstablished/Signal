@@ -244,7 +244,7 @@ fn conflict(cx: &Cx, out: &mut Out, mut flow: Flow, text: String) {
         flow.parked = flow.stage.take().map(Box::new);
         flow.stage = Some(Stage::Conflict { incoming });
     }
-    present(out, &mut flow);
+    present(out, cx, &mut flow);
     out.flow = FlowChange::Set(Box::new(flow));
 }
 
@@ -293,7 +293,7 @@ async fn callback_turn(
             out.edit(message_id, "✏️ Changing this request…");
             let mut flow = flow;
             flow.stage = Some(Stage::Revise(p));
-            present(out, &mut flow);
+            present(out, cx, &mut flow);
             out.flow = FlowChange::Set(Box::new(flow));
             Ok(())
         }
@@ -301,7 +301,7 @@ async fn callback_turn(
             out.edit(message_id, "👍 Continuing with your earlier request.");
             let mut flow = flow;
             flow.stage = flow.parked.take().map(|b| *b);
-            present(out, &mut flow);
+            present(out, cx, &mut flow);
             out.flow = FlowChange::Set(Box::new(flow));
             Ok(())
         }
@@ -345,7 +345,7 @@ async fn question_button(
         if page * PAGE < q.options.len().max(1) {
             q.page = page;
             flow.stage = Some(Stage::Question(q));
-            present(out, &mut flow);
+            present(out, cx, &mut flow);
             out.flow = FlowChange::Set(Box::new(flow));
         }
         return Ok(());
@@ -381,7 +381,7 @@ async fn question_button(
             return Ok(());
         }
     }
-    present(out, &mut flow);
+    present(out, cx, &mut flow);
     out.flow = FlowChange::Set(Box::new(flow));
     Ok(())
 }
@@ -509,14 +509,14 @@ pub async fn drive(
             Resolved::Ask(q, action) => {
                 flow.current = Some(action);
                 flow.stage = Some(Stage::Question(q));
-                present(out, &mut flow);
+                present(out, cx, &mut flow);
                 out.flow = FlowChange::Set(Box::new(flow));
                 return Ok(());
             }
             Resolved::Propose(p) => {
                 flow.current = Some(p.action.clone());
                 flow.stage = Some(Stage::Confirm(p));
-                present(out, &mut flow);
+                present(out, cx, &mut flow);
                 out.flow = FlowChange::Set(Box::new(flow));
                 return Ok(());
             }
@@ -1396,11 +1396,16 @@ async fn confirm(
 // ---------------------------------------------------------------------------------------------
 // Rendering.
 
-fn present(out: &mut Out, flow: &mut Flow) {
+fn present(out: &mut Out, cx: &Cx, flow: &mut Flow) {
     flow.step += 1;
     let Some(stage) = flow.stage.clone() else {
         return;
     };
+    // Every question and confirmation gets its own 30 minutes. A conflict prompt does not
+    // extend the request it interrupted.
+    if !matches!(stage, Stage::Conflict { .. }) {
+        flow.expires_at = cx.expiry();
+    }
     let key = |code: &str| format!("k|{}|{}|{}", flow.token, flow.step, code);
     let button = |label: &str, code: &str| json!({"text": label, "callback_data": key(code)});
     let (text, rows): (String, Vec<Vec<Value>>) = match &stage {

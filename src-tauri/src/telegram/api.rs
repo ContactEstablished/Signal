@@ -180,3 +180,195 @@ impl Api for HttpApi {
         Ok(bytes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    const TOKEN: &str = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw";
+
+    /// A scripted Telegram: answers each connection in order and records the requests.
+    fn telegram(responses: Vec<(u16, Vec<u8>)>) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for (status, body) in responses {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0u8; 4096];
+                loop {
+                    let n = socket.read(&mut buf).unwrap();
+                    request.extend_from_slice(&buf[..n]);
+                    if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&request[..end]).to_lowercase();
+                        let len = head
+                            .lines()
+                            .find_map(|l| {
+                                l.strip_prefix("content-length: ")
+                                    .and_then(|v| v.parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        if request.len() >= end + 4 + len {
+                            break;
+                        }
+                    }
+                }
+                let head = format!(
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                socket.write_all(head.as_bytes()).unwrap();
+                socket.write_all(&body).unwrap();
+                seen.push(String::from_utf8(request).unwrap());
+            }
+            seen
+        });
+        (base, handle)
+    }
+    fn ok(result: Value) -> (u16, Vec<u8>) {
+        (
+            200,
+            json!({"ok":true,"result":result}).to_string().into_bytes(),
+        )
+    }
+    fn fail(status: u16, description: &str) -> (u16, Vec<u8>) {
+        (
+            status,
+            json!({"ok":false,"error_code":status,"description":description})
+                .to_string()
+                .into_bytes(),
+        )
+    }
+
+    #[tokio::test]
+    async fn requests_use_the_bot_api_shapes_telegram_expects() {
+        let (base, server) = telegram(vec![
+            ok(json!([{"update_id":9,"message":{"text":"hi"}}])),
+            ok(json!({"message_id":55})),
+            ok(json!(true)),
+            fail(400, "Bad Request: message is not modified"),
+            ok(json!(true)),
+        ]);
+        let api = HttpApi::new(&base, TOKEN).unwrap();
+        let updates = api.updates(9, 25).await.unwrap();
+        assert_eq!(updates[0]["update_id"], 9);
+        let markup = json!({"inline_keyboard":[[{"text":"Yes","callback_data":"k|a|1|y"}]]});
+        assert_eq!(api.send(7, "hello", Some(&markup)).await.unwrap(), 55);
+        api.edit(7, 55, "changed", None).await.unwrap();
+        // Telegram refuses an identical edit; that is not a failure.
+        api.edit(7, 55, "changed", None).await.unwrap();
+        api.answer("cb1", "Done").await.unwrap();
+
+        let seen = server.join().unwrap();
+        let body = |i: usize| -> Value {
+            serde_json::from_str(seen[i].split("\r\n\r\n").nth(1).unwrap()).unwrap()
+        };
+        assert!(seen[0].starts_with(&format!("POST /bot{TOKEN}/getUpdates ")));
+        assert_eq!(
+            body(0),
+            json!({"offset":9,"timeout":25,"allowed_updates":["message","callback_query"]})
+        );
+        assert!(seen[1].starts_with(&format!("POST /bot{TOKEN}/sendMessage ")));
+        assert_eq!(body(1)["chat_id"], 7);
+        assert_eq!(body(1)["reply_markup"], markup);
+        assert!(seen[2].contains("/editMessageText "));
+        assert_eq!(
+            body(2)["reply_markup"],
+            json!({"inline_keyboard":[]}),
+            "an edit without buttons clears them"
+        );
+        assert!(seen[4].contains("/answerCallbackQuery "));
+        assert_eq!(body(4)["callback_query_id"], "cb1");
+    }
+
+    #[tokio::test]
+    async fn failures_are_classified_and_never_echo_the_token() {
+        let (base, server) = telegram(vec![
+            fail(401, "Unauthorized"),
+            fail(409, "Conflict: terminated by other getUpdates request"),
+            fail(429, "Too Many Requests: retry after 5"),
+            fail(500, "boom"),
+        ]);
+        let api = HttpApi::new(&base, TOKEN).unwrap();
+        let codes: Vec<_> = [
+            api.updates(0, 1).await.unwrap_err(),
+            api.updates(0, 1).await.unwrap_err(),
+            api.updates(0, 1).await.unwrap_err(),
+            api.send(1, "x", None).await.unwrap_err(),
+        ]
+        .into_iter()
+        .map(|e| {
+            assert!(!e.message.contains(TOKEN), "{}", e.message);
+            e.code
+        })
+        .collect();
+        assert_eq!(
+            codes,
+            [
+                "TelegramAuth",
+                "TelegramConflict",
+                "TelegramRate",
+                "Telegram"
+            ]
+        );
+        server.join().unwrap();
+
+        // An unreachable server reports a plain network failure with no URL or token in it.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead = format!("http://{}", listener.local_addr().unwrap());
+        drop(listener);
+        let error = HttpApi::new(&dead, TOKEN)
+            .unwrap()
+            .send(1, "x", None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "Network");
+        assert!(
+            !error.message.contains(TOKEN) && !error.message.contains("http"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[tokio::test]
+    async fn downloads_are_size_limited_before_and_while_streaming() {
+        let (base, server) = telegram(vec![
+            ok(json!({"file_path":"voice/file_1.oga","file_size":4})),
+            (200, vec![1, 2, 3, 4]),
+            ok(json!({"file_path":"voice/big.oga","file_size":5_000_000})),
+            ok(json!({"file_path":"voice/liar.oga","file_size":3})),
+            (200, vec![0; 64]),
+        ]);
+        let api = HttpApi::new(&base, TOKEN).unwrap();
+        assert_eq!(api.download("a", 1_000).await.unwrap(), vec![1, 2, 3, 4]);
+        assert!(
+            api.download("b", 1_000_000).await.is_err(),
+            "declared size is refused without downloading"
+        );
+        assert!(
+            api.download("c", 10).await.is_err(),
+            "a file larger than it claimed is cut off"
+        );
+        let seen = server.join().unwrap();
+        assert!(seen[1].starts_with(&format!("GET /file/bot{TOKEN}/voice/file_1.oga ")));
+        assert_eq!(seen.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn the_bot_is_identified_and_a_webhook_is_cleared_before_polling() {
+        let (base, server) = telegram(vec![
+            ok(json!({"id":1,"username":"signal_dev_bot"})),
+            ok(json!(true)),
+        ]);
+        let api = HttpApi::new(&base, TOKEN).unwrap();
+        assert_eq!(api.me().await.unwrap()["username"], "signal_dev_bot");
+        api.clear_webhook().await.unwrap();
+        let seen = server.join().unwrap();
+        assert!(seen[0].contains("/getMe ") && seen[1].contains("/deleteWebhook "));
+    }
+}

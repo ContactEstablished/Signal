@@ -3,6 +3,8 @@
 <script lang="ts">
   import AIInbox from './lib/views/AIInbox.svelte';
   import VoiceSettings from './lib/components/voice/VoiceSettings.svelte';
+  import TelegramSettings from './lib/components/telegram/TelegramSettings.svelte';
+  import * as telegram from './lib/telegram/api';
   import TimerStatus from './lib/components/shell/TimerStatus.svelte';
   import { onMount, tick } from 'svelte';
   import YourDay from './lib/views/YourDay.svelte';
@@ -221,6 +223,7 @@
   const settingPages = [
     'General',
     'Voice & AI',
+    'Telegram',
     'Notifications',
     'Managers & summaries',
     'Integrations',
@@ -383,6 +386,9 @@
   }
   async function load() {
     await workspace.load();
+    // The Telegram bot needs the display time zone once the workspace is open.
+    if (workspace.foundation)
+      void telegram.runtime(workspace.timeZone).catch((e) => (workspace.notice = errorMessage(e)));
   }
   onMount(() => {
     void load();
@@ -396,6 +402,14 @@
           event.payload.requestId,
         ),
     ).then((unlisten) => (disposed ? unlisten() : cleanup.push(unlisten)));
+    // Changes the Telegram bot saved while Signal was open.
+    void listen('signal://data-changed', () => {
+      workspace.tick();
+      if (workspace.foundation)
+        void workspace
+          .refresh()
+          .catch((e) => (workspace.notice = errorMessage(e)));
+    }).then((unlisten) => (disposed ? unlisten() : cleanup.push(unlisten)));
     void subscribeAttachments(
       () =>
         workspace.editor?.kind === 'new'
@@ -482,6 +496,12 @@
       event.preventDefault();
       void openNew();
     }
+  }
+  // The Telegram bot only answers while Signal keeps running, so setup turns the tray option on.
+  async function enableTray() {
+    if (!data || data.tray) return;
+    await setTrayPreference(true);
+    data.tray = true;
   }
   async function toggleTray() {
     if (!data || saving) return;
@@ -614,6 +634,8 @@
       <h1>{settingsPage}</h1>
       {#if settingsPage === 'Voice & AI'}
         <VoiceSettings />
+      {:else if settingsPage === 'Telegram'}
+        <TelegramSettings onEnableTray={enableTray} />
       {:else if settingsPage === 'Notifications'}
         <div class="setting-row">
           <div>

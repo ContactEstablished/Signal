@@ -103,10 +103,6 @@ pub fn parse_date(text: &str, today: NaiveDate) -> Option<NaiveDate> {
     Some(today + Duration::days(if ahead == 0 { 7 } else { ahead }))
 }
 
-pub fn monday_of(date: NaiveDate) -> NaiveDate {
-    date - Duration::days(date.weekday().num_days_from_monday() as i64)
-}
-
 pub fn hhmm(time: NaiveTime) -> String {
     format!("{:02}:{:02}", time.hour(), time.minute())
 }

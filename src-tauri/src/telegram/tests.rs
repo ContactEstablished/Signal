@@ -740,3 +740,69 @@ async fn replies_are_retried_after_a_delivery_failure_without_repeating_effects(
     assert!(b.api.last().0.contains("Add task"));
     assert_eq!(b.brain.calls(), 1, "the message was not interpreted twice");
 }
+
+#[tokio::test]
+async fn each_question_gets_a_fresh_thirty_minutes() {
+    let b = bench().await;
+    b.pair().await;
+    b.brain
+        .say(actions(json!([{"type":"add_task","title":"Slow burn"}])));
+    b.say("add slow burn").await;
+    assert!(b.api.last().0.contains("Which project"));
+
+    // Answered 20 minutes later: the confirmation then has its own 30 minutes.
+    b.set_now("2026-10-29T14:20:00.000Z");
+    b.tap("Billing").await;
+    assert!(b.api.last().0.contains("Add task"));
+    b.set_now("2026-10-29T14:45:00.000Z");
+    b.tap("Confirm").await;
+    assert_eq!(
+        b.count("SELECT COUNT(*) FROM tasks").await,
+        1,
+        "25 minutes after the card is still valid"
+    );
+}
+
+#[tokio::test]
+async fn a_restart_between_storing_and_handling_an_update_still_acts_exactly_once() {
+    let b = bench().await;
+    b.pair().await;
+    b.brain.say(actions(
+        json!([{"type":"add_task","title":"Survives restart","project_name":"Billing"}]),
+    ));
+    let update = b.message(USER, CHAT, "private", "add survives restart to billing");
+
+    // Stored but not yet handled (the app stopped), and delivered again by Telegram afterwards.
+    let clock = ClockSource::Fixed(NOW.into());
+    let env = Env {
+        pool: &b.pool,
+        api: &b.api,
+        brain: &b.brain,
+        clock: &clock,
+        tz: TZ,
+        pairing: &b.pairing,
+    };
+    engine::ingest(&env, &[update.clone()]).await.unwrap();
+    assert_eq!(
+        b.count("SELECT COUNT(*) FROM telegram_updates WHERE processed=0")
+            .await,
+        1
+    );
+    b.deliver(vec![update.clone(), update]).await;
+    assert_eq!(
+        b.count("SELECT COUNT(*) FROM telegram_updates").await,
+        1,
+        "duplicates are stored once"
+    );
+    assert_eq!(b.brain.calls(), 1);
+    assert_eq!(b.count("SELECT COUNT(*) FROM telegram_flow").await, 1);
+
+    b.tap("Confirm").await;
+    assert_eq!(b.count("SELECT COUNT(*) FROM tasks").await, 1);
+    let mut conn = b.pool.acquire().await.unwrap();
+    assert_eq!(
+        engine::next_offset(&mut conn).await.unwrap(),
+        4,
+        "the next poll acknowledges everything handled"
+    );
+}
