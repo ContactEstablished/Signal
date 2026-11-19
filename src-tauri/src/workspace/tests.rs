@@ -385,13 +385,13 @@ async fn project_edit_preserves_summary_fields_and_reorders_at_boundaries() {
         Some(first.clone()),
         ProjectInput {
             name: " Renamed ".into(),
-            color: "mint".into(),
+            color: "orchid".into(),
         },
     )
     .await
     .unwrap();
     assert_eq!(edited["name"], "Renamed");
-    assert_eq!(edited["color"], "mint");
+    assert_eq!(edited["color"], "orchid");
     assert_eq!(edited["manager_name"], "Owner");
     assert_eq!(edited["summary_tone"], "detailed");
     assert_eq!(edited["summary_send_at"], "17:00");

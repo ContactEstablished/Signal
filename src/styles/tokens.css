@@ -21,6 +21,11 @@
   --magenta: #f279c9;
   --violet: #b48cff;
   --mint: #6ee7b7;
+  --blue: #7aa2ff;
+  --gold: #f2cc5b;
+  --orchid: #de8af5;
+  --green: #8fd46a;
+  --slate: #a7b1c6;
   --warn: #ff9f52;
   --danger: #ff7a7a;
   --on-accent: #04202a;
@@ -32,6 +37,11 @@
   --magenta-rgb: 242, 121, 201;
   --violet-rgb: 180, 140, 255;
   --mint-rgb: 110, 231, 183;
+  --blue-rgb: 122, 162, 255;
+  --gold-rgb: 242, 204, 91;
+  --orchid-rgb: 222, 138, 245;
+  --green-rgb: 143, 212, 106;
+  --slate-rgb: 167, 177, 198;
   --warn-rgb: 255, 159, 82;
   --project-rgb: var(--cyan-rgb);
   --project-color: var(--accent);
@@ -200,6 +210,26 @@
 [data-color='mint'] {
   --project-color: var(--mint);
   --project-rgb: var(--mint-rgb);
+}
+[data-color='blue'] {
+  --project-color: var(--blue);
+  --project-rgb: var(--blue-rgb);
+}
+[data-color='gold'] {
+  --project-color: var(--gold);
+  --project-rgb: var(--gold-rgb);
+}
+[data-color='orchid'] {
+  --project-color: var(--orchid);
+  --project-rgb: var(--orchid-rgb);
+}
+[data-color='green'] {
+  --project-color: var(--green);
+  --project-rgb: var(--green-rgb);
+}
+[data-color='slate'] {
+  --project-color: var(--slate);
+  --project-rgb: var(--slate-rgb);
 }
 [data-color='orange'] {
   --project-color: var(--warn);

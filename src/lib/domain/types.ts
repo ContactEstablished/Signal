@@ -8,13 +8,28 @@ export const statuses = [
 ] as const;
 export type TaskStatus = (typeof statuses)[number];
 export type Priority = 'low' | 'medium' | 'high';
-export type ProjectColor = 'cyan' | 'lime' | 'magenta' | 'violet' | 'mint';
+export type ProjectColor =
+  | 'cyan'
+  | 'lime'
+  | 'magenta'
+  | 'violet'
+  | 'mint'
+  | 'blue'
+  | 'gold'
+  | 'orchid'
+  | 'green'
+  | 'slate';
 export const projectColors: ProjectColor[] = [
   'cyan',
   'lime',
   'magenta',
   'violet',
   'mint',
+  'blue',
+  'gold',
+  'orchid',
+  'green',
+  'slate',
 ];
 export const statusLabels: Record<TaskStatus, string> = {
   backlog: 'Backlog',

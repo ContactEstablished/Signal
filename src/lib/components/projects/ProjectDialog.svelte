@@ -12,10 +12,12 @@
   } from '../../domain/types';
   let {
     project = null,
+    usedColors = [],
     onSave,
     onClose,
   }: {
     project?: ProjectRecord | null;
+    usedColors?: ProjectColor[];
     onSave: (input: { name: string; color: ProjectColor }) => Promise<unknown>;
     onClose: () => void;
   } = $props();
@@ -30,7 +32,9 @@
   let closePromise: Promise<boolean> | null = null;
   let saving: Promise<void> | null = null;
   onMount(() => {
-    initial = { name: project?.name ?? '', color: project?.color ?? 'cyan' };
+    const fresh =
+      projectColors.find((c) => !usedColors.includes(c)) ?? projectColors[0];
+    initial = { name: project?.name ?? '', color: project?.color ?? fresh };
     name = initial.name;
     color = initial.color;
     dialog.showModal();
