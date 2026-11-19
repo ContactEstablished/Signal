@@ -519,7 +519,7 @@ pub fn parse_suggestions(mut draft: Draft, projects: &[Value], content: &str) ->
     draft.projects.retain(|p| p.created_id.is_some());
     for task in tasks {
         let title = nonblank(text(task, "title")?)?;
-        let source = if draft.source_kind == "image" {
+        let source = if draft.source_kind != "voice" {
             task["source"].as_str().unwrap_or("").to_owned()
         } else if let Some(id) = task.get("source_id") {
             let excerpts = transcript_excerpts(&draft.transcript);
@@ -530,7 +530,7 @@ pub fn parse_suggestions(mut draft: Draft, projects: &[Value], content: &str) ->
             // Compatibility with providers that still return the previous quote format.
             nonblank(text(task, "source")?)?
         };
-        if draft.source_kind != "image" && !draft.transcript.contains(&source) {
+        if draft.source_kind == "voice" && !draft.transcript.contains(&source) {
             return Err(AppError::validation("AI suggested a task without a matching transcript excerpt. Review the transcript and retry."));
         }
         let mut project_id = task["project_id"]
@@ -637,6 +637,15 @@ pub fn parse_suggestions(mut draft: Draft, projects: &[Value], content: &str) ->
             warning,
             duplicate_ok: false,
             created_id: None,
+            link_url: task["link_url"]
+                .as_str()
+                .filter(|u| crate::links::validate(u).is_ok())
+                .map(str::to_owned),
+            mail_ref: task["mail_ref"]
+                .as_str()
+                .filter(|r| crate::outlook::parse_ref(r).is_ok())
+                .map(str::to_owned),
+            auto: draft.source_kind == "email" && task["auto"] == true,
         });
     }
     draft.validate()?;

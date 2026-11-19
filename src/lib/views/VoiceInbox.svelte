@@ -1,8 +1,12 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
-  import { Mic, Square, X, Check, Plus, ArrowRight, ClipboardPaste } from 'lucide-svelte';
+  import { Mic, Square, X, Check, Plus, ArrowRight, ClipboardPaste, Mail, ExternalLink, ChevronRight, Trash2 } from 'lucide-svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import * as voiceApi from '../voice/api';
   import * as imageApi from '../voice/image-api';
+  import * as emailApi from '../voice/email-api';
+  import * as calendarApi from '../calendar/api';
+  import { openExternalUrl } from '../native/commands';
   import MeetingCandidate from '../components/voice/MeetingCandidate.svelte';
   import type { MeetingRef } from '../domain/agenda';
   import { record, type Recording } from '../voice/capture';
@@ -12,7 +16,7 @@
     type CloseReason,
   } from '../domain/types';
   import type { Workspace } from '../state/app.svelte';
-  import { meetingIssue } from '../voice/review';
+  import { meetingIssue, emailSummary, autoSummary } from '../voice/review';
   import { dueFields, resolveTaskDate } from '../domain/agenda-calendar';
   let {
     workspace,
@@ -23,20 +27,31 @@
     onGuard,
   }: {
     workspace: Workspace;
-    mode?: 'voice' | 'image';
+    mode?: 'voice' | 'image' | 'email';
     onOpenMeeting?: (ref: MeetingRef) => unknown;
     onOpenTask: (id: string) => unknown;
-    onSettings: () => unknown;
+    /** Opens a settings page; Voice & AI when no page is given. */
+    onSettings: (page?: string) => unknown;
     onGuard: (active: boolean) => void;
   } = $props();
   const isImage = untrack(() => mode === 'image');
-  const api = isImage ? { ...voiceApi, ...imageApi } : voiceApi;
+  const isEmail = untrack(() => mode === 'email');
+  const api = isImage ? { ...voiceApi, ...imageApi } : isEmail ? { ...voiceApi, ...emailApi } : voiceApi;
+  // Image and email suggestions never invent projects; each item needs one chosen.
+  const needsProject = isImage || isEmail;
+  /** Inboxes that suggest tasks; null until loaded. */
+  let inboxes = $state<string[] | null>(null);
+  function flagRecovery(on: boolean) {
+    if (isImage) workspace.imageRecovery = on;
+    else if (isEmail) workspace.emailRecovery = on;
+    else workspace.voiceRecovery = on;
+  }
   let imageUrl = $state(''), zoom = $state(false);
   let fileInput = $state<HTMLInputElement>();
   let draft = $state<voiceApi.Draft | null>(null),
     ready = $state(false),
     phase = $state<
-      'idle' | 'uploading' | 'recording' | 'transcribing' | 'suggesting' | 'accepting'
+      'idle' | 'uploading' | 'recording' | 'transcribing' | 'suggesting' | 'accepting' | 'undoing'
     >('idle'),
     error = $state(''),
     notice = $state(''),
@@ -54,6 +69,10 @@
     saveChain = Promise.resolve(),
     timer: ReturnType<typeof setTimeout> | undefined;
   let unlistenDrop: (() => void) | undefined;
+  let unlistenChecked: (() => void) | undefined;
+  /** The last automatic email check, and whether the review on screen is older than it. */
+  let lastAuto = $state<emailApi.AutoStatus | null>(null),
+    behind = $state(false);
   let pendingSave: voiceApi.Draft | null = null;
   let dateErrors = $state<string[]>([]);
   let confirmation = $state(''),
@@ -68,11 +87,12 @@
     }, 1000);
     return () => clearInterval(interval);
   });
+  const AUTO = 'Added automatically';
   const grouped = $derived.by(() => {
     const groups = new Map<string, voiceApi.Candidate[]>();
     for (const c of draft?.candidates ?? []) {
       const name = c.created_id
-        ? 'Created items'
+        ? c.auto ? AUTO : 'Created items'
         : (workspace.projects.find((p) => p.id === c.project_id)?.name ??
           draft?.projects.find((p) => p.id === c.proposal_id)?.name ??
           'Choose a project');
@@ -80,7 +100,8 @@
       list.push(c);
       groups.set(name, list);
     }
-    return [...groups.entries()];
+    // Tasks Signal added by itself come first, where Undo is easy to find.
+    return [...groups.entries()].sort(([a], [b]) => Number(b === AUTO) - Number(a === AUTO));
   });
   const selected = $derived(
     draft?.candidates.filter((c) => c.selected && !c.created_id) ?? [],
@@ -111,12 +132,19 @@
       if (paths.length !== 1) { error = 'Choose one image per review.'; return; }
       void replaceImage(paths[0]);
     }).then(fn => disposed ? fn() : unlistenDrop = fn).catch(e => error = errorMessage(e));
+    if (isEmail) void emailApi.onChecked(s => {
+      lastAuto = s;
+      behind = true;
+    }).then(fn => disposed ? fn() : unlistenChecked = fn).catch(() => {});
     void (async () => {
       try {
         draft = await api.load();
         pending = await api.recovery();
-        if (isImage) workspace.imageRecovery = !!pending;
-        else workspace.voiceRecovery = !!pending;
+        flagRecovery(!!pending);
+        if (isEmail) {
+          inboxes = (await calendarApi.status()).accounts.filter(a => a.mail && a.mail_tasks).map(a => a.email);
+          lastAuto = await emailApi.autoStatus();
+        }
         if (isImage && draft?.image_id) imageUrl = await imageApi.image(draft.image_id);
         ready = true;
       } catch (e) {
@@ -127,12 +155,23 @@
   onDestroy(() => {
     disposed = true;
     unlistenDrop?.();
+    unlistenChecked?.();
     generation++;
     clearTimeout(timer);
     if (recording) void recording.cancel();
     if (busy) void api.cancel();
     decide(false);
     onGuard(false);
+  });
+  // After an automatic check, show its results once nothing on screen is mid-edit.
+  $effect(() => {
+    if (!behind || !ready || busy || unsaved || saving || pending) return;
+    behind = false;
+    const epoch = generation, edited = edits;
+    void emailApi.load().then(d => {
+      if (disposed || epoch !== generation || edited !== edits || unsaved) { behind = true; return; }
+      draft = d;
+    }).catch(e => (error = errorMessage(e)));
   });
   function changed() {
     unsaved = true;
@@ -340,15 +379,14 @@
       };
     }
     phase = 'accepting';
-    if (isImage) workspace.imageRecovery = true;
-    else workspace.voiceRecovery = true;
+    flagRecovery(true);
     try {
       await api.setRecovery($state.snapshot(pending));
-      created = await (isImage ? workspace.acceptImage($state.snapshot(pending)) : workspace.acceptVoice($state.snapshot(pending)));
+      const input = $state.snapshot(pending);
+      created = await (isImage ? workspace.acceptImage(input) : isEmail ? workspace.acceptEmail(input) : workspace.acceptVoice(input));
       await api.setRecovery(null);
       pending = null;
-      if (isImage) workspace.imageRecovery = false;
-      else workspace.voiceRecovery = false;
+      flagRecovery(false);
       draft = await api.load();
       notice =
         'Selected items created. Unselected suggestions remain in this review.';
@@ -365,8 +403,7 @@
         try {
           await api.setRecovery(null);
           pending = null;
-          if (isImage) workspace.imageRecovery = false;
-      else workspace.voiceRecovery = false;
+          flagRecovery(false);
         } catch {
           error += ' Could not clear recovery; retry before leaving.';
         }
@@ -380,8 +417,9 @@
       !draft ||
       busy ||
       pending ||
-      !(await ask(
-        'Discard this source and unaccepted suggestions? Created items will remain.',
+      !(await ask(isEmail
+        ? 'Clear this review? Uncreated suggestions are removed and those emails will not be suggested again. Created tasks remain.'
+        : 'Discard this source and unaccepted suggestions? Created items will remain.',
       ))
     )
       return;
@@ -398,16 +436,90 @@
       error = errorMessage(e);
     }
   }
+  async function checkEmail() {
+    if (!isEmail || busy || pending || !ready || dateErrors.length) return;
+    error = '';
+    notice = '';
+    const epoch = ++generation;
+    // New suggestions are added to this review; nothing already here is replaced.
+    if (!draft) { draft = emailApi.newDraft(workspace.nowUtc, workspace.timeZone); changed(); }
+    await persist();
+    if (unsaved || disposed || epoch !== generation || !draft) return;
+    phase = 'suggesting';
+    try {
+      const result = await emailApi.check($state.snapshot(draft));
+      if (disposed || epoch !== generation) return;
+      draft = result.draft;
+      inboxes = result.inboxes;
+      notice = emailSummary(result);
+      if (result.problems.length) error = result.problems.join(' ');
+    } catch (e) {
+      if (epoch === generation) error = errorMessage(e);
+    } finally {
+      if (epoch === generation) phase = 'idle';
+    }
+  }
+  /** Deletes a task Signal added by itself; refused once time is tracked on it. */
+  async function undo(c: voiceApi.Candidate) {
+    if (!isEmail || !draft || busy || pending) return;
+    error = '';
+    notice = '';
+    const epoch = ++generation;
+    await persist();
+    if (unsaved || disposed || epoch !== generation || !draft) return;
+    phase = 'undoing';
+    try {
+      const next = await emailApi.undo($state.snapshot(draft), c.id);
+      if (disposed || epoch !== generation) return;
+      draft = next;
+      notice = `Removed “${c.title}”.`;
+    } catch (e) {
+      if (epoch === generation) error = errorMessage(e);
+    } finally {
+      if (epoch === generation) phase = 'idle';
+    }
+  }
+  function openEmail(c: voiceApi.Candidate) {
+    const opened = c.mail_ref ? calendarApi.openOutlook(c.mail_ref) : openExternalUrl(c.link_url!);
+    void opened.catch(e => (error = errorMessage(e)));
+  }
   function assign(c: voiceApi.Candidate, v: string) {
     c.project_id = v.startsWith('project:') ? v.slice(8) : null;
     c.proposal_id = v.startsWith('new:') ? v.slice(4) : null;
     c.duplicate_ok = false;
     changed();
   }
+  /** Email suggestions that are expanded; the rest show only their title bar. */
+  const open = new SvelteSet<string>();
+  function toggle(id: string) {
+    if (open.has(id)) open.delete(id);
+    else open.add(id);
+  }
+  /** Who sent it, the priority and the due date, for the collapsed bar. */
+  function barInfo(c: voiceApi.Candidate): string {
+    const from = c.source?.split(' · ')[0] ?? '';
+    const due = c.due_at
+      ? 'due ' + new Date(c.due_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: draft?.time_zone })
+      : '';
+    return [from, c.priority + ' priority', due].filter(Boolean).join(' · ');
+  }
+  /** Drops a suggestion you don't want; its email has been read and is not suggested again. */
+  function remove(c: voiceApi.Candidate) {
+    if (!draft || busy || pending || c.created_id) return;
+    const i = draft.candidates.findIndex(x => x.id === c.id);
+    if (i < 0) return;
+    draft.candidates.splice(i, 1);
+    open.delete(c.id);
+    error = '';
+    notice = `Deleted “${c.title || 'Untitled task'}”.`;
+    changed();
+  }
   function addTask() {
     if (!draft) return;
+    const id = crypto.randomUUID();
+    if (isEmail) open.add(id);
     draft.candidates.push({
-      id: crypto.randomUUID(),
+      id,
       selected: true,
       project_id: null,
       proposal_id: null,
@@ -521,16 +633,117 @@
 
 </script>
 
+{#snippet fields(c: voiceApi.Candidate)}
+                    {#if needsProject && !c.project_id && !c.proposal_id}<p class="warning">Which project is this {c.kind === 'meeting' ? 'meeting' : 'task'} for?</p>{/if}
+                    <label
+                      >Project<select
+                        value={c.project_id
+                          ? 'project:' + c.project_id
+                          : c.proposal_id
+                            ? 'new:' + c.proposal_id
+                            : ''}
+                        onchange={(e) => assign(c, e.currentTarget.value)}
+                        ><option value="">Choose a project…</option
+                        >{#each workspace.projects as p}<option
+                            value={'project:' + p.id}
+                            >{p.name} · {p.color}</option
+                          >{/each}{#each draft!.projects as p}<option
+                            value={'new:' + p.id}
+                            >{p.name || 'Unnamed project'}
+                            {p.created_id ? '' : '(new)'}</option
+                          >{/each}</select
+                      ></label
+                    >
+                    <label
+                      >Title<input
+                        bind:value={c.title}
+                        oninput={() => {
+                          c.duplicate_ok = false;
+                          changed();
+                        }}
+                        maxlength="500"
+                      /></label
+                    >
+                    {#if c.kind === 'meeting' && c.meeting}
+                      <MeetingCandidate bind:meeting={c.meeting} onChange={() => {c.duplicate_ok = false; changed();}} />
+                    {:else}
+                    <label
+                      >Notes<textarea
+                        bind:value={c.notes}
+                        oninput={changed}
+                        rows="3"></textarea></label
+                    >
+                    <label
+                      >Subtasks · one per line<textarea
+                        value={c.subtasks.join('\n')}
+                        oninput={(e) => {
+                          c.subtasks = e.currentTarget.value.split('\n');
+                          changed();
+                        }}
+                        rows="2"></textarea></label
+                    >
+                    <div class="task-fields">
+                      <label
+                        >Due · {draft!.time_zone}<input
+                          type="datetime-local"
+                          step="0.001"
+                          value={c.due_at
+                            ? `${dueFields(c.due_at, draft!.time_zone).date}T${dueFields(c.due_at, draft!.time_zone).time}`
+                            : ''}
+                          onchange={(e) => deadline(c, e.currentTarget.value)}
+                        /></label
+                      ><label
+                        >Priority<select
+                          bind:value={c.priority}
+                          onchange={changed}
+                          ><option>low</option><option>medium</option><option
+                            >high</option
+                          ></select
+                        ></label
+                      ><label
+                        >Estimate · hours<input
+                          type="number"
+                          min="0"
+                          step="0.25"
+                          value={c.estimate_h ?? ''}
+                          oninput={(e) => {
+                            c.estimate_h =
+                              e.currentTarget.value === ''
+                                ? null
+                                : Number(e.currentTarget.value);
+                            changed();
+                          }}
+                        /></label
+                      >
+                    </div>
+                    {/if}
+                    {#if c.source}<blockquote>
+                        {c.source}
+                      </blockquote>{/if}{#if c.link_url || c.mail_ref}<button class="outline" onclick={() => openEmail(c)}>Open email <ExternalLink /></button>{/if}{#if c.warning}<p class="warning">
+                        {c.warning}
+                      </p>{/if}
+                    <label class="inline"
+                      ><input
+                        type="checkbox"
+                        bind:checked={c.duplicate_ok}
+                        onchange={changed}
+                      />Allow a duplicate {c.kind === 'meeting' ? 'title and start time' : 'title'} in this project if intentional</label
+                    >
+{/snippet}
+
+
 <svelte:window onkeydown={pasteShortcut} onpaste={pasteImage} ondragover={e => { if (isImage && e.dataTransfer?.types.includes('Files')) e.preventDefault(); }} ondrop={e => { if (isImage && e.dataTransfer?.files.length) { e.preventDefault(); void upload(e.dataTransfer.files); } }} />
 <main class="voice-page">
   <div class="heading">
     <div>
-      <h1>{isImage ? 'Image intake' : 'Voice intake'}</h1>
+      <h1>{isImage ? 'Image intake' : isEmail ? 'Email intake' : 'Voice intake'}</h1>
       <p>
-        {isImage ? 'Paste an image to identify meetings and tasks automatically. Choose a project if needed, then review and create.' : 'Dictate your projects and tasks. Review first; create only what you choose.'}
+        {isImage ? 'Paste an image to identify meetings and tasks automatically. Choose a project if needed, then review and create.'
+          : isEmail ? 'Signal reads your new email and suggests tasks with priorities and due dates. Sure tasks from inboxes set to add automatically are added for you; review the rest.'
+          : 'Dictate your projects and tasks. Review first; create only what you choose.'}
       </p>
     </div>
-    <button class="outline" onclick={onSettings}>Voice & AI settings</button>
+    <button class="outline" onclick={() => onSettings()}>Voice & AI settings</button>
   </div>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
@@ -545,6 +758,16 @@
         {#if busy}<span role="status">{phase === 'suggesting' ? `Analyzing image… ${suggestionSeconds}s elapsed (up to 90 seconds).` : phase === 'uploading' ? 'Saving image…' : 'Creating selected items…'}</span>
           {#if phase === 'suggesting'}<button class="outline" onclick={cancel}>Cancel analysis</button>{/if}
         {/if}
+      </section>
+    {:else if isEmail}
+      <section class="capture">
+        <button class="primary" disabled={busy || !!pending || !inboxes?.length || !!dateErrors.length} onclick={checkEmail}><Mail />Check email</button>
+        {#if busy}<span role="status">{phase === 'suggesting' ? `Reading new email… ${suggestionSeconds}s elapsed (up to 2 minutes).` : phase === 'undoing' ? 'Removing task…' : 'Creating selected tasks…'}</span>
+          {#if phase === 'suggesting'}<button class="outline" onclick={cancel}><X />Cancel</button>{/if}
+        {:else if inboxes && !inboxes.length}<span>No inbox is set up for suggestions yet.</span><button class="outline" onclick={() => onSettings('Calendar & email')}>Calendar & email settings</button>
+        {:else if inboxes}<span>From {inboxes.join(', ')}</span>{/if}
+        {#if lastAuto}<span class="auto-status">{autoSummary(lastAuto, workspace.timeZone)}{#if lastAuto.error} <span class="warning">{lastAuto.error}</span>{/if}</span>{/if}
+        <small>Signal checks every 15 minutes while it is open, or now with Check email. It only reads your email; it never sends, moves or marks anything. Each check sends up to 15 new emails from the last 7 days to your configured AI provider, and each email is checked once. Promotions, social, forum and update emails are skipped.</small>
       </section>
     {:else}
     <section class="capture">
@@ -598,26 +821,27 @@
     {#if draft}
       <div class="review">
         <section class="source">
-          <h2>{isImage ? 'Image and instructions' : 'Transcript'}</h2>
+          <h2>{isImage ? 'Image and instructions' : isEmail ? 'Instructions' : 'Transcript'}</h2>
           {#if isImage && imageUrl}<button class="image-preview" aria-label="Enlarge source image" onclick={() => zoom = true}><img src={imageUrl} alt="Source for task and meeting suggestions" /></button>{/if}
+          {#if isEmail}<p>Optional guidance for the next Check email, such as which senders matter most.</p>{/if}
           {#if isImage}<p>Instructions are optional. Meetings, times, and other visible details are filled in automatically. Add guidance here if needed, then analyze again.</p>{/if}
           <textarea
-            aria-label={isImage ? 'Instructions' : 'Transcript'}
-            placeholder={isImage ? 'Optional: assign these meetings to Atlas, or focus on a specific part of the image…' : undefined}
-            rows={isImage ? 5 : 16}
+            aria-label={isImage || isEmail ? 'Instructions' : 'Transcript'}
+            placeholder={isImage ? 'Optional: assign these meetings to Atlas, or focus on a specific part of the image…' : isEmail ? 'Optional: anything from Dana is high priority; ignore automated reports…' : undefined}
+            rows={isImage || isEmail ? 5 : 16}
             bind:value={draft.transcript}
             oninput={changed}
             disabled={busy || !!pending}></textarea>
           <p>
-            {draft.time_zone} · recorded {new Date(
+            {draft.time_zone} · {isEmail ? 'started' : 'recorded'} {new Date(
               draft.recorded_at,
             ).toLocaleString()}
           </p>
-          <button
+          {#if !isEmail}<button
             class="outline"
             disabled={busy || !!pending || (isImage ? !draft.image_id : !draft.transcript.trim())}
             onclick={() => analyze()}>{phase === 'suggesting' ? 'Analyzing…' : isImage ? 'Analyze image' : 'Suggest tasks'}</button
-          >
+          >{/if}
           <p aria-live="polite">
             {saving
               ? 'Saving review…'
@@ -630,7 +854,7 @@
             >{/if}
         </section>
         <section class="suggestions">
-          <h2>{isImage ? 'Suggested tasks and meetings' : 'Task recommendations'}</h2>
+          <h2>{isImage ? 'Suggested tasks and meetings' : isEmail ? 'Suggested tasks from email' : 'Task recommendations'}</h2>
           <fieldset disabled={busy || !!pending}>
             {#each draft.projects as p (p.id)}<section
                 class="proposed"
@@ -697,12 +921,42 @@
               </h3>
               {#each candidates as c (c.id)}
                 <article class:created={!!c.created_id}>
-                  {#if c.created_id}<strong><Check />Created: {c.title}</strong
+                  {#if c.created_id}<strong><Check />{c.auto ? 'Added' : 'Created'}: {c.title}</strong
                     ><button
                       class="outline"
                       onclick={() => c.kind === 'meeting' ? onOpenMeeting({meetingId:c.created_id!, occurrenceKey:'o:0'}) : onOpenTask(c.created_id!)}
                       >Open {c.kind === 'meeting' ? 'meeting' : 'task'} <ArrowRight /></button
-                    >
+                    >{#if c.auto}{#if c.link_url || c.mail_ref}<button class="outline" onclick={() => openEmail(c)}>Open email <ExternalLink /></button>{/if}<button
+                        class="outline"
+                        onclick={() => undo(c)}
+                        aria-label={`Undo ${c.title}`}><X />Undo</button
+                      >{#if c.source}<blockquote>{c.source}</blockquote>{/if}{/if}
+                  {:else if isEmail}
+                    <div class="bar">
+                      <input
+                        type="checkbox"
+                        bind:checked={c.selected}
+                        onchange={changed}
+                        aria-label={`Include ${c.title || 'untitled task'}`}
+                      /><button
+                        class="toggle"
+                        aria-expanded={open.has(c.id)}
+                        aria-controls={`fields-${c.id}`}
+                        onclick={() => toggle(c.id)}
+                        ><span class="chevron" class:open={open.has(c.id)}><ChevronRight /></span
+                        ><span class="bar-text"
+                          ><strong>{c.title || 'Untitled task'}</strong
+                          ><small>{barInfo(c)}{#if !c.project_id && !c.proposal_id}{' · '}<span class="warning">needs a project</span>{/if}</small
+                        ></span
+                      ></button
+                      ><button
+                        class="outline"
+                        disabled={busy || !!pending}
+                        onclick={() => remove(c)}
+                        aria-label={`Delete ${c.title || 'untitled task'}`}><Trash2 />Delete</button
+                      >
+                    </div>
+                    {#if open.has(c.id)}<div class="fields" id={`fields-${c.id}`}>{@render fields(c)}</div>{/if}
                   {:else}
                     <label class="inline"
                       ><input
@@ -711,101 +965,7 @@
                         onchange={changed}
                       /><strong>Include {c.kind === 'meeting' ? 'meeting' : 'task · To Do'}</strong></label
                     >
-                    {#if isImage && !c.project_id && !c.proposal_id}<p class="warning">Which project is this {c.kind === 'meeting' ? 'meeting' : 'task'} for?</p>{/if}
-                    <label
-                      >Project<select
-                        value={c.project_id
-                          ? 'project:' + c.project_id
-                          : c.proposal_id
-                            ? 'new:' + c.proposal_id
-                            : ''}
-                        onchange={(e) => assign(c, e.currentTarget.value)}
-                        ><option value="">Choose a project…</option
-                        >{#each workspace.projects as p}<option
-                            value={'project:' + p.id}
-                            >{p.name} · {p.color}</option
-                          >{/each}{#each draft.projects as p}<option
-                            value={'new:' + p.id}
-                            >{p.name || 'Unnamed project'}
-                            {p.created_id ? '' : '(new)'}</option
-                          >{/each}</select
-                      ></label
-                    >
-                    <label
-                      >Title<input
-                        bind:value={c.title}
-                        oninput={() => {
-                          c.duplicate_ok = false;
-                          changed();
-                        }}
-                        maxlength="500"
-                      /></label
-                    >
-                    {#if c.kind === 'meeting' && c.meeting}
-                      <MeetingCandidate bind:meeting={c.meeting} onChange={() => {c.duplicate_ok = false; changed();}} />
-                    {:else}
-                    <label
-                      >Notes<textarea
-                        bind:value={c.notes}
-                        oninput={changed}
-                        rows="3"></textarea></label
-                    >
-                    <label
-                      >Subtasks · one per line<textarea
-                        value={c.subtasks.join('\n')}
-                        oninput={(e) => {
-                          c.subtasks = e.currentTarget.value.split('\n');
-                          changed();
-                        }}
-                        rows="2"></textarea></label
-                    >
-                    <div class="task-fields">
-                      <label
-                        >Due · {draft.time_zone}<input
-                          type="datetime-local"
-                          step="0.001"
-                          value={c.due_at
-                            ? `${dueFields(c.due_at, draft.time_zone).date}T${dueFields(c.due_at, draft.time_zone).time}`
-                            : ''}
-                          onchange={(e) => deadline(c, e.currentTarget.value)}
-                        /></label
-                      ><label
-                        >Priority<select
-                          bind:value={c.priority}
-                          onchange={changed}
-                          ><option>low</option><option>medium</option><option
-                            >high</option
-                          ></select
-                        ></label
-                      ><label
-                        >Estimate · hours<input
-                          type="number"
-                          min="0"
-                          step="0.25"
-                          value={c.estimate_h ?? ''}
-                          oninput={(e) => {
-                            c.estimate_h =
-                              e.currentTarget.value === ''
-                                ? null
-                                : Number(e.currentTarget.value);
-                            changed();
-                          }}
-                        /></label
-                      >
-                    </div>
-                    {/if}
-                    {#if c.source}<blockquote>
-                        {c.source}
-                      </blockquote>{/if}{#if c.warning}<p class="warning">
-                        {c.warning}
-                      </p>{/if}
-                    <label class="inline"
-                      ><input
-                        type="checkbox"
-                        bind:checked={c.duplicate_ok}
-                        onchange={changed}
-                      />Allow a duplicate {c.kind === 'meeting' ? 'title and start time' : 'title'} in this project if intentional</label
-                    >
+                    {@render fields(c)}
                   {/if}
                 </article>
               {/each}{/each}
@@ -819,14 +979,14 @@
                 disabled={!selected.length ||
                   unsaved ||
                   saving ||
-                  !!dateErrors.length || selected.some(c => !!meetingIssue(c) || (isImage && !c.project_id && !c.proposal_id))}
+                  !!dateErrors.length || selected.some(c => !!meetingIssue(c) || (needsProject && !c.project_id && !c.proposal_id))}
                 onclick={accept}
                 ><Check />Create selected ({selected.length})</button
               ><button class="outline" onclick={discard}
                 >{draft.candidates.length &&
                 draft.candidates.every((c) => c.created_id)
                   ? 'Finish review'
-                  : 'Discard draft'}</button
+                  : isEmail ? 'Clear review' : 'Discard draft'}</button
               >
             </div>
           </fieldset>
@@ -955,6 +1115,51 @@
   }
   .created {
     opacity: 0.75;
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .bar input {
+    width: auto;
+  }
+  .toggle {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: none;
+    padding: 0;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .bar-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .bar-text strong,
+  .bar-text small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bar-text small {
+    color: var(--text-muted);
+  }
+  .chevron {
+    display: inline-flex;
+    transition: transform 0.15s;
+  }
+  .chevron.open {
+    transform: rotate(90deg);
+  }
+  .fields {
+    margin-top: 16px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
   }
   .warning {
     color: var(--warn);

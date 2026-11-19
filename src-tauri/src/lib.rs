@@ -1,10 +1,12 @@
 mod agenda;
 mod attachments;
+mod calendar;
 mod clock;
 mod db;
 mod exit_guard;
 mod intake;
 mod links;
+mod outlook;
 mod planner;
 mod telegram;
 mod timers;
@@ -34,6 +36,8 @@ pub fn run() {
         .manage(window::GeometryReady::default())
         .manage(exit_guard::EditGuard::default())
         .manage(telegram::Telegram::default())
+        .manage(calendar::Calendars::default())
+        .manage(intake::email::MailCheck::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
@@ -53,6 +57,13 @@ pub fn run() {
             intake::images::suggest_image_items,
             intake::images::image_recovery,
             intake::images::set_image_recovery,
+            intake::email::load_email_draft,
+            intake::email::save_email_draft,
+            intake::email::check_email,
+            intake::email::undo_email_task,
+            intake::email::email_auto_status,
+            intake::email::email_recovery,
+            intake::email::set_email_recovery,
             intake::voice_recovery,
             intake::set_voice_recovery,
             intake::voice_settings,
@@ -122,6 +133,18 @@ pub fn run() {
             telegram::telegram_cancel_pairing,
             telegram::telegram_unpair,
             telegram::telegram_runtime,
+            calendar::calendar_status,
+            calendar::calendar_import_client,
+            calendar::calendar_connect,
+            calendar::calendar_cancel_connect,
+            calendar::calendar_set_project,
+            calendar::calendar_set_mail,
+            calendar::calendar_set_auto_add,
+            calendar::calendar_remove_account,
+            calendar::calendar_sync_now,
+            calendar::calendar_runtime,
+            outlook::outlook_add_accounts,
+            outlook::outlook_open,
             exit_guard::set_edit_guard,
             exit_guard::resolve_exit_request
         ])

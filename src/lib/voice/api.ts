@@ -22,11 +22,17 @@ export interface Candidate {
   estimate_h: number | null;
   source: string;
   warning: string;
+  /** Web link back to the source, such as the email in Gmail. */
+  link_url?: string | null;
+  /** An Outlook message; Open email shows it in Outlook (classic). */
+  mail_ref?: string | null;
   duplicate_ok: boolean;
   created_id: string | null;
+  /** Email only: Signal judged it sure and adds it without review. */
+  auto?: boolean;
 }
 export interface Draft {
-  source_kind?: "voice" | "image";
+  source_kind?: "voice" | "image" | "email";
   image_id?: string | null;
   id: string;
   revision: number;

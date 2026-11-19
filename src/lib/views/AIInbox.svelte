@@ -6,13 +6,14 @@
   import type { MeetingRef } from '../domain/agenda';
   let { workspace, onOpenTask, onOpenMeeting, onSettings, onGuard }: {
     workspace: Workspace; onOpenTask:(id:string)=>unknown; onOpenMeeting:(ref:MeetingRef)=>unknown;
-    onSettings:()=>unknown; onGuard:(active:boolean)=>void;
+    onSettings:(page?:string)=>unknown; onGuard:(active:boolean)=>void;
   } = $props();
-  let tab = $state<'voice'|'image'>(untrack(() => workspace.imageRecovery ? 'image' : 'voice'));
+  type Tab = 'voice'|'image'|'email';
+  let tab = $state<Tab>(untrack(() => workspace.emailRecovery ? 'email' : workspace.imageRecovery ? 'image' : 'voice'));
   let child = $state<VoiceInbox | null>(null);
   let switching = $state(false);
   export async function requestClose(reason: CloseReason) { return (await child?.requestClose(reason)) ?? true; }
-  async function select(next: 'voice'|'image') {
+  async function select(next: Tab) {
     if (next === tab || switching) return;
     switching = true;
     try { if (await requestClose('navigation')) tab = next; }
@@ -20,7 +21,7 @@
   }
 </script>
 <section class="ai-inbox" aria-label="AI Inbox">
-<nav class="inbox-tabs" aria-label="AI Inbox inputs"><strong>AI Inbox</strong><button class:active={tab === 'voice'} aria-pressed={tab === 'voice'} disabled={switching} onclick={() => select('voice')}>Voice</button><button class:active={tab === 'image'} aria-pressed={tab === 'image'} disabled={switching} onclick={() => select('image')}>Image</button></nav>
+<nav class="inbox-tabs" aria-label="AI Inbox inputs"><strong>AI Inbox</strong><button class:active={tab === 'voice'} aria-pressed={tab === 'voice'} disabled={switching} onclick={() => select('voice')}>Voice</button><button class:active={tab === 'image'} aria-pressed={tab === 'image'} disabled={switching} onclick={() => select('image')}>Image</button><button class:active={tab === 'email'} aria-pressed={tab === 'email'} disabled={switching} onclick={() => select('email')}>Email</button></nav>
 {#key tab}<VoiceInbox bind:this={child} mode={tab} {workspace} {onOpenTask} {onOpenMeeting} {onSettings} {onGuard} />{/key}
 </section>
 <style>

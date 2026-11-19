@@ -5,6 +5,8 @@
   import VoiceSettings from './lib/components/voice/VoiceSettings.svelte';
   import TelegramSettings from './lib/components/telegram/TelegramSettings.svelte';
   import * as telegram from './lib/telegram/api';
+  import CalendarSettings from './lib/components/calendar/CalendarSettings.svelte';
+  import * as calendar from './lib/calendar/api';
   import TimerStatus from './lib/components/shell/TimerStatus.svelte';
   import { onMount, tick } from 'svelte';
   import YourDay from './lib/views/YourDay.svelte';
@@ -198,7 +200,7 @@
   let voice = $state<AIInbox | null>(null), voiceGuard = $state(false);
   $effect(() => {
     const guarded =
-      voiceGuard || workspace.voiceRecovery || workspace.imageRecovery ||
+      voiceGuard || workspace.intakeRecovery ||
       !!due ||
       workspace.agenda.guarded ||
       !!workspace.editor ||
@@ -225,8 +227,8 @@
     'Voice & AI',
     'Telegram',
     'Notifications',
+    'Calendar & email',
     'Managers & summaries',
-    'Integrations',
     'Appearance',
     'Data & backup',
   ];
@@ -258,7 +260,7 @@
         let proceed = editor ? await editor.requestClose(reason) : true;
         if (proceed && day) proceed = await day.requestClose(reason);
         if (proceed && voice) proceed = await voice.requestClose(reason);
-        if (workspace.voiceRecovery || workspace.imageRecovery) proceed = false;
+        if (workspace.intakeRecovery) proceed = false;
         if (
           workspace.agenda.recovery ||
           workspace.planner.recovery ||
@@ -310,7 +312,7 @@
     destination: string,
     view: 'board' | 'week' | 'notes' = 'board',
   ) {
-    if (destination === 'voice' && (workspace.voiceRecovery || workspace.imageRecovery) && !workspace.editor) { await workspace.select(destination, view); return; }
+    if (destination === 'voice' && workspace.intakeRecovery && !workspace.editor) { await workspace.select(destination, view); return; }
     if (await closeEditor('navigation'))
       await workspace.select(destination, view);
   }
@@ -387,8 +389,11 @@
   async function load() {
     await workspace.load();
     // The Telegram bot needs the display time zone once the workspace is open.
-    if (workspace.foundation)
+    if (workspace.foundation) {
       void telegram.runtime(workspace.timeZone).catch((e) => (workspace.notice = errorMessage(e)));
+      // Calendar sync imports meetings in the display time zone.
+      void calendar.runtime(workspace.timeZone).catch((e) => (workspace.notice = errorMessage(e)));
+    }
   }
   onMount(() => {
     void load();
@@ -617,7 +622,7 @@
     </section>
   </main>
 {:else if active === 'voice'}
-  <AIInbox onOpenMeeting={openMeeting} bind:this={voice} {workspace} onOpenTask={id=>openTask(id,true)} onGuard={v=>voiceGuard=v} onSettings={()=>{settingsPage='Voice & AI';void navigate('settings');}} />
+  <AIInbox onOpenMeeting={openMeeting} bind:this={voice} {workspace} onOpenTask={id=>openTask(id,true)} onGuard={v=>voiceGuard=v} onSettings={(page)=>{settingsPage=page ?? 'Voice & AI';void navigate('settings');}} />
 {:else if active === 'settings'}
   <main class="settings-layout">
     <aside class="settings-nav">
@@ -636,6 +641,8 @@
         <VoiceSettings />
       {:else if settingsPage === 'Telegram'}
         <TelegramSettings onEnableTray={enableTray} />
+      {:else if settingsPage === 'Calendar & email'}
+        <CalendarSettings projects={workspace.projects} />
       {:else if settingsPage === 'Notifications'}
         <div class="setting-row">
           <div>
@@ -822,6 +829,7 @@
   <ProjectDialog
     bind:this={projectDialog}
     project={workspace.editor.project}
+    usedColors={workspace.projects.map((p) => p.color)}
     onSave={projectSave}
     onClose={() => void projectClose()}
   />

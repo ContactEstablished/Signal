@@ -1,5 +1,6 @@
 import * as voiceApi from '../voice/api';
 import * as imageApi from '../voice/image-api';
+import * as emailApi from '../voice/email-api';
 import { AgendaState } from './agenda.svelte';
 import type { MeetingChange, MeetingRef } from '../domain/agenda';
 import { PlannerState } from './planner.svelte';
@@ -43,6 +44,7 @@ export class Workspace {
   staged = $state<StagedAttachment[]>([]);
   voiceRecovery = $state(false);
   imageRecovery = $state(false);
+  emailRecovery = $state(false);
   loading = $state(true);
   boardLoading = $state(false);
   error = $state('');
@@ -80,6 +82,7 @@ export class Workspace {
       }
       this.voiceRecovery = !!(await voiceApi.recovery());
       this.imageRecovery = !!(await imageApi.recovery());
+      this.emailRecovery = !!(await emailApi.recovery());
       this.projects = await commands.listProjects();
       this.planner.initialize(this.selectedDate, this.timeZone);
       await this.planner.load(this.timeZone);
@@ -248,10 +251,11 @@ export class Workspace {
 
   private mutate<T>(
     operation: () => Promise<T>,
-    retryKind: 'planner' | 'agenda' | 'voice' | 'image' | null = null,
+    retryKind: 'planner' | 'agenda' | 'voice' | 'image' | 'email' | null = null,
   ): Promise<T> {
     return this.queue.enqueue(async () => {
       if (this.imageRecovery && retryKind !== 'image') throw new Error('Open AI Inbox and retry pending image creation first.');
+      if (this.emailRecovery && retryKind !== 'email') throw new Error('Open AI Inbox and retry pending email task creation first.');
       if (this.voiceRecovery && retryKind !== 'voice') throw new Error('Open Voice Inbox and retry the pending task creation first.');
       if (retryKind !== 'planner') this.planner.assertWritable();
       if (retryKind !== 'agenda') this.agenda.assertWritable();
@@ -296,6 +300,13 @@ export class Workspace {
   }
   acceptImage(input: voiceApi.Acceptance) {
     return this.mutate(() => imageApi.accept(input), 'image');
+  }
+  acceptEmail(input: voiceApi.Acceptance) {
+    return this.mutate(() => emailApi.accept(input), 'email');
+  }
+  /** Any AI Inbox review waiting on Retry; nothing else may write until it is resolved. */
+  get intakeRecovery() {
+    return this.voiceRecovery || this.imageRecovery || this.emailRecovery;
   }
   acceptVoice(input: voiceApi.Acceptance) {
     return this.mutate(() => voiceApi.accept(input), 'voice');

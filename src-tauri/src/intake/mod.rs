@@ -1,4 +1,5 @@
 mod data;
+pub mod email;
 mod engine;
 pub mod images;
 pub(crate) mod settings;
@@ -206,3 +207,6 @@ mod tests;
 
 #[cfg(test)]
 mod image_tests;
+
+#[cfg(test)]
+mod email_tests;

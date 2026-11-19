@@ -359,6 +359,13 @@
       >{/if}
   </div>
   <h2>{persisted ? persisted.occurrence.title : 'Schedule a meeting'}</h2>
+  {#if persisted?.source}<p class="source-note">
+      From {persisted.source.kind === 'outlook' ? 'Outlook' : 'Google Calendar'}.
+      Title, time, link and agenda follow {persisted.source.kind === 'outlook'
+        ? 'Outlook'
+        : 'Google'} and are replaced when the event changes there; your notes,
+      attendance and linked tasks stay.
+    </p>{/if}
   {#if discard}<section class="discard">
       <h3>Discard unsaved meeting changes?</h3>
       <div class="agenda-actions">
@@ -613,6 +620,11 @@
     color: var(--accent);
     border-color: var(--accent);
     background: var(--bg-raised);
+  }
+  .source-note {
+    margin: 0 0 8px;
+    color: var(--text-muted);
+    font-size: 0.9em;
   }
   .detail-mode {
     width: var(--modal-meeting-detail);

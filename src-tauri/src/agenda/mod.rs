@@ -158,7 +158,7 @@ pub async fn meeting_detail(conn: &mut SqliteConnection, r: &MeetingRef) -> Resu
         .filter(|t| links.contains(&t["id"]))
         .collect::<Vec<_>>();
     Ok(
-        json!({"occurrence":o,"series":{"is_recurring":is_series(conn,&m).await?,"repeat_rule":s["repeat_rule"],"repeat_weekdays":recurrence::weekdays(s)?,"repeat_until":s["repeat_until"],"fold_policy":s["fold_policy"],"revision":m["revision"]},"linked_tasks":tasks}),
+        json!({"occurrence":o,"series":{"is_recurring":is_series(conn,&m).await?,"repeat_rule":s["repeat_rule"],"repeat_weekdays":recurrence::weekdays(s)?,"repeat_until":s["repeat_until"],"fold_policy":s["fold_policy"],"revision":m["revision"]},"linked_tasks":tasks,"source":crate::calendar::sync::source(conn,&r.meeting_id).await?}),
     )
 }
 pub(crate) fn bounds(d: chrono::NaiveDate, tz: &str) -> Result<(String, String)> {

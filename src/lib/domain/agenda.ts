@@ -96,6 +96,8 @@ export interface MeetingDetail {
     is_recurring: boolean;
   };
   linked_tasks: AgendaTask[];
+  /** Set when the meeting was brought in from an external calendar. */
+  source?: { kind: 'google' | 'outlook' } | null;
 }
 export interface TaskMeetingPage {
   task_id: string;

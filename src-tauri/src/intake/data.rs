@@ -35,6 +35,19 @@ pub struct Candidate {
     pub warning: String,
     pub duplicate_ok: bool,
     pub created_id: Option<String>,
+    /// Where the suggestion came from, such as the Gmail message; becomes the task's link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_url: Option<String>,
+    /// An Outlook message ("<account id>:<entry id>") that Open email shows in Outlook.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mail_ref: Option<String>,
+    /// Email only: Signal judged this task sure and adds it without review.
+    /// Once created it stays marked, so the review can show it under "Added automatically".
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub auto: bool,
+}
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -60,7 +73,7 @@ fn voice_kind() -> String {
 impl Draft {
     pub fn validate(&self) -> Result<()> {
         nonblank(&self.id)?;
-        choice(&self.source_kind, &["voice", "image"])?;
+        choice(&self.source_kind, &["voice", "image", "email"])?;
         if self.revision < 0 {
             return Err(AppError::conflict());
         }
@@ -88,6 +101,21 @@ impl Draft {
             choice(&c.kind, &["task", "meeting"])?;
             if self.source_kind == "voice" && c.kind != "task" {
                 return Err(AppError::validation("Voice supports tasks only."));
+            }
+            if c.auto && self.source_kind != "email" {
+                return Err(AppError::validation("Only email tasks are added automatically."));
+            }
+            if self.source_kind == "email" && c.kind != "task" {
+                return Err(AppError::validation("Email suggestions are tasks only."));
+            }
+            if let Some(link) = &c.link_url {
+                if link.len() > 2_000 {
+                    return Err(AppError::validation("Invalid task suggestion."));
+                }
+                crate::links::validate(link)?;
+            }
+            if let Some(r) = &c.mail_ref {
+                crate::outlook::parse_ref(r)?;
             }
             if c.meeting
                 .as_ref()
@@ -238,6 +266,42 @@ pub async fn discard(pool: &SqlitePool, id: &str, revision: i64) -> Result<()> {
         .await?;
     tx.commit().await?;
     Ok(())
+}
+/// The tag on tasks Signal added from email without review.
+pub const FROM_EMAIL_TAG: &str = "From email";
+
+/// Removes one created suggestion from a review, after its task was deleted (Undo).
+/// Ordinary saves never drop created suggestions, so this has its own revision check.
+pub async fn drop_created(
+    pool: &SqlitePool,
+    id: &str,
+    revision: i64,
+    candidate_id: &str,
+) -> Result<Draft> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let raw: String =
+        sqlx::query_scalar("SELECT payload FROM intake_drafts WHERE id=? AND revision=?")
+            .bind(id)
+            .bind(revision)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(AppError::conflict)?;
+    let mut draft: Draft = serde_json::from_str(&raw).map_err(|_| AppError::conflict())?;
+    let before = draft.candidates.len();
+    draft.candidates.retain(|c| c.id != candidate_id);
+    if draft.candidates.len() == before {
+        return Err(AppError::missing());
+    }
+    draft.revision += 1;
+    sqlx::query("UPDATE intake_drafts SET payload=?,revision=?,updated_at=? WHERE id=?")
+        .bind(json!(draft).to_string())
+        .bind(draft.revision)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(&draft.id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(draft)
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -391,7 +455,7 @@ pub async fn accept(pool: &SqlitePool, request: Accept, now: &str) -> Result<Val
                     c.title
                 )));
             }
-            let result = tasks::create_in(&mut tx, json!({"project_id":project_id,"title":c.title,"status":"todo","priority":c.priority,"notes_md":c.notes,"due_at":c.due_at,"estimate_h":c.estimate_h,"external_url":null,"external_provider":null,"external_id":null,"blocked_reason":null,"blocked_on":null,"subtasks":c.subtasks.iter().filter(|s| !s.trim().is_empty()).map(|s| json!({"title":s,"done":false})).collect::<Vec<_>>(),"tags":[],"alerts":[1440,60],"attachments":[]}), now).await?;
+            let result = tasks::create_in(&mut tx, json!({"project_id":project_id,"title":c.title,"status":"todo","priority":c.priority,"notes_md":c.notes,"due_at":c.due_at,"estimate_h":c.estimate_h,"external_url":c.link_url,"external_provider":null,"external_id":null,"blocked_reason":null,"blocked_on":null,"subtasks":c.subtasks.iter().filter(|s| !s.trim().is_empty()).map(|s| json!({"title":s,"done":false})).collect::<Vec<_>>(),"tags":if c.auto { json!([{"name":FROM_EMAIL_TAG,"color":"blue"}]) } else { json!([]) },"alerts":[1440,60],"attachments":[]}), now).await?;
             c.created_id = result["task"]["id"].as_str().map(str::to_owned);
             created.push(
                 json!({"id":c.created_id,"project_id":project_id,"title":c.title,"kind":"task"}),

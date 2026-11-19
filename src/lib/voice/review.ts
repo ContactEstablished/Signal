@@ -14,3 +14,24 @@ export function meetingIssue(c: Candidate): string {
     return '';
   } catch (e) { return e instanceof Error ? e.message : 'Confirm the meeting date, time, and timezone.'; }
 }
+/** One-line result of an email check, shown above the review. */
+const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+function found(r: { suggested: number; added?: number }): string {
+  const parts = [
+    r.added ? `${n(r.added, 'task')} added automatically` : '',
+    r.suggested ? `${n(r.suggested, 'suggested task')} added below` : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(', ') + '.' : 'no tasks found.';
+}
+export function emailSummary(r: { checked: number; suggested: number; added?: number; remaining: number; problems: string[] }): string {
+  if (!r.checked) return r.problems.length ? '' : 'No new email since the last check.';
+  const more = r.remaining ? ` ${n(r.remaining, 'more new email')} waiting; click Check email again.` : '';
+  return `Checked ${n(r.checked, 'new email')}: ${found(r)}${more}`;
+}
+/** One line about the last automatic check. */
+export function autoSummary(s: { at: string; checked: number; suggested: number; added: number; remaining: number }, timeZone?: string): string {
+  const at = new Date(s.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone });
+  if (!s.checked) return `Checked automatically at ${at}. No new email.`;
+  const more = s.remaining ? ` ${n(s.remaining, 'more new email')} will be checked in a few minutes.` : '';
+  return `Checked automatically at ${at}: ${n(s.checked, 'new email')}, ${found(s)}${more}`;
+}
